@@ -1,7 +1,7 @@
 import { mixToMono, encodeWav } from './dsp.js';
 
-const COLORS = ['#ff4b5c', '#1cb0ff', '#1fd15f', '#ffb020', '#b18cff', '#2fd8c6'];
-const LETTERS = 'ABCDEF';
+const COLORS = ['#ff4b5c', '#1cb0ff', '#1fd15f', '#ffb020', '#b18cff', '#2fd8c6', '#ff7ad9', '#c8d84a'];
+const LETTERS = 'ABCDEFGH';
 const $ = (s) => document.querySelector(s);
 
 let song = null;     // { x: Float32Array, sr, name }
@@ -174,9 +174,10 @@ function render() {
   $('#results').hidden = false;
 
   const ignored = r.rejected.length ? ` · ${r.rejected.length} non-kick hits ignored` : '';
+  const nGood = r.clusters.filter((c) => !c.noisy).length;
   $('#summary').innerHTML =
     `<b>${escapeHtml(song.name)}</b><span>${r.bpm.toFixed(1)} BPM · ${r.totalKicks} kicks · ` +
-    `${r.clusters.length} kick type${r.clusters.length > 1 ? 's' : ''}${ignored}</span>`;
+    `${nGood} kick type${nGood !== 1 ? 's' : ''}${ignored}</span>`;
 
   // per-hit ownership (for colouring the overview): which group owns which sample range
   const spans = [];
@@ -200,8 +201,12 @@ function render() {
     });
   };
 
-  const rows = $('#rows');
+  const rows = $('#rows'), noisyRows = $('#noisyRows');
   rows.innerHTML = '';
+  noisyRows.innerHTML = '';
+  const nNoisy = r.clusters.filter((c) => c.noisy).length;
+  $('#noisyWrap').hidden = !nNoisy;
+  $('#noisySummary').textContent = `${nNoisy} noisy group${nNoisy > 1 ? 's' : ''}`;
   const drawers = [drawOverview];
 
   r.clusters.forEach((c, ci) => {
@@ -233,12 +238,48 @@ function render() {
 
     // right box: the extracted kick
     const kickCv = row.querySelector('.kick canvas');
-    drawers.push(() => drawWave(kickCv, c.median, 0, c.median.length, () => color));
+    drawers.push(() => {
+      const { g, w, h } = drawWave(kickCv, c.median, 0, c.median.length, () => color);
+      if (c.parts) { // where the kick ends and the off-beat part begins
+        const xs = Math.round(c.parts.splitAt * w) + 0.5;
+        g.save();
+        g.setLineDash([4, 4]);
+        g.strokeStyle = '#ffffffcc';
+        g.lineWidth = 1;
+        g.beginPath(); g.moveTo(xs, 0); g.lineTo(xs, h); g.stroke();
+        g.restore();
+        g.fillStyle = '#ffffffb0';
+        g.font = '10px system-ui, sans-serif';
+        g.fillText('kick', 4, h - 4);
+        g.fillText('off-beat', xs + 4, h - 4);
+      }
+    });
     row.querySelector('.kick .play').onclick = (e) => play(c.median, sr, e.currentTarget);
 
     const base = `${safe(song.name)}_kick-${LETTERS[ci]}${c.note ? '_' + c.note.replace('#', 's') : ''}`;
-    row.querySelector('.dl-median').onclick = () => download(c.median, sr, `${base}_median.wav`);
-    row.querySelector('.dl-mean').onclick = () => download(c.mean, sr, `${base}_mean.wav`);
+    const ms = (sig) => `${Math.round(sig.length / sr * 1000)} ms`;
+    const parts = c.parts
+      ? [
+        { label: 'Kick only', sig: c.parts.kick, file: 'kick', main: true },
+        { label: 'Off-beat part', hint: 'reverse bass etc.', sig: c.parts.offbeat, file: 'offbeat' },
+        { label: 'Full beat', sig: c.median, file: 'fullbeat' },
+        { label: 'Full beat, mean', hint: 'smoother, outliers leak in', sig: c.mean, file: 'fullbeat_mean' },
+      ]
+      : [
+        { label: 'Kick', sig: c.median, file: 'median', main: true },
+        { label: 'Kick, mean', hint: 'smoother, outliers leak in', sig: c.mean, file: 'mean' },
+      ];
+    const pl = row.querySelector('.parts');
+    for (const p of parts) {
+      const li = document.createElement('li');
+      if (p.main) li.className = 'main';
+      li.innerHTML = `<button class="play small" aria-label="Play">▶</button>` +
+        `<span class="label"><b>${p.label}</b><small>${p.hint ? p.hint + ' · ' : ''}${ms(p.sig)}</small></span>` +
+        `<button class="dl small">⬇ WAV</button>`;
+      li.querySelector('.play').onclick = (e) => play(p.sig, sr, e.currentTarget);
+      li.querySelector('.dl').onclick = () => download(p.sig, sr, `${base}_${p.file}.wav`);
+      pl.appendChild(li);
+    }
 
     const ul = row.querySelector('.singles ul');
     c.cleanest.forEach((hit, hi) => {
@@ -252,7 +293,7 @@ function render() {
       ul.appendChild(li);
     });
 
-    rows.appendChild(row);
+    (c.noisy ? noisyRows : rows).appendChild(row);
   });
 
   $('#playSong').onclick = (e) => play(x, sr, e.currentTarget);
@@ -261,6 +302,8 @@ function render() {
 }
 
 let redraw = () => {};
+// canvases inside a closed <details> have no size yet -> draw them when it opens
+$('#noisyWrap').addEventListener('toggle', () => redraw());
 let resizeTimer = 0;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => redraw(), 120); });
 

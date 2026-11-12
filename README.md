@@ -8,16 +8,24 @@ Static site, no server, no build step; the audio never leaves the device.
 Hardstyle is close to a best case for this: the kick is one sample, repeated hundreds of times on a
 steady 4/4 grid, and it's the loudest thing in the mix. So:
 
-1. **Find kicks**: onsets in the energy below 150 Hz, then a precise tempo/phase fit
+1. **Find kicks**: spectral-flux onsets (30 Hz–10 kHz), then a precise tempo/phase fit
    (circular periodogram over onset times). Only hits on the beat grid are kept, which drops off-beat
-   reverse basses. Hits that aren't bass-heavy (e.g. chord changes in the breakdown) are dropped too.
-2. **Align**: each hit is shifted by cross-correlation against the median hit.
-3. **Group**: k-means on attack + tail spectra (fine 1/6-octave bands 30–250 Hz on the tail), so
-   re-pitched kicks and kick + clap on 2 & 4 become separate results. The number of groups is picked
-   by silhouette score, or set manually.
+   sounds. Hits with hardly any bass (e.g. chord changes in the breakdown) are dropped too.
+   A bass-only onset detector does *not* work for rawstyle: the reverse bass swells up right before
+   each kick, so the low end gets quieter when the kick hits.
+2. **Group**: k-means on attack + tail spectra (fine 1/6-octave bands 30–250 Hz on the tail), so
+   re-pitched kicks, kick + clap on 2 & 4, and melodic-section kicks become separate results.
+   Auto mode over-clusters (up to 8) and merges groups whose averages correlate > 0.85.
+3. **Align** within each group: cross-correlation against the group median, 3 passes.
 4. **Average**: sample-wise median (and mean) over all level-matched hits per group. Everything that
-   isn't locked to the kick (melody, vocals, screeches) cancels out. The page also ranks the
-   individual hits closest to the average ("cleanest single hits").
+   isn't locked to the kick (melody, vocals, screeches) cancels out. Groups are ranked by consistency
+   x loudness (the drop kick is usually the loudest thing in a hardstyle track); inconsistent groups
+   are tucked away as "noisy".
+5. **Split**: if the averaged beat has a near-silent gap (rawstyle: kick, gap, reverse bass), the kick
+   and the off-beat part are also exported separately. The page also ranks the individual hits
+   closest to the average ("cleanest single hits").
+
+Tested on a synthetic track (`test/`) and on Sickmode & Rooler – *Too Cold* (160 BPM rawstyle).
 
 **Limits:** you get the kick as it sounds in the finished master, not the dry sample, and anything
 that hits exactly with the kick every time (layered clap, a reverse bass right behind it) stays in.

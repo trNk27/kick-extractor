@@ -85,6 +85,7 @@ const refA = kickA.map(v => Math.tanh(1.2 * v) * 0.9), refB = kickB.map(v => Mat
 let ok = Math.abs(res.bpm - 150) < 0.2 && Math.abs(res.totalKicks - truth.length) <= 3;
 console.log(`rejected (not bass-heavy): ${res.rejected.length}`);
 for (const [i, c] of res.clusters.entries()) {
+  if (c.noisy) { console.log(`group ${i + 1}: n=${c.count} (noisy, ignored)`); continue; }
   const ca = corrAtBestLag(c.median, refA), cb = corrAtBestLag(c.median, refB);
   const label = ca > cb ? 'A' : 'B';
   const truthCounts = { A: 0, B: 0 };

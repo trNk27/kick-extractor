@@ -116,19 +116,34 @@ function dot(a, aOff, b, bOff, len) {
 
 // ---------------------------------------------------------------- 1. onset envelope
 
-export function lowBandFlux(x, sr, { hop = 256, frame = 512, fc = 150 } = {}) {
-  const lp = lowpass(lowpass(x, sr, fc), sr, fc); // 4th order
-  const nFrames = Math.max(0, Math.floor((x.length - frame) / hop));
-  const logEnv = new Float32Array(nFrames);
-  for (let f = 0; f < nFrames; f++) {
-    let e = 0;
-    const s = f * hop;
-    for (let i = 0; i < frame; i++) e += lp[s + i] * lp[s + i];
-    logEnv[f] = Math.log(1e-4 + Math.sqrt(e / frame));
-  }
+// Spectral flux: how much the (log-compressed) spectrum grows from one frame to the next, summed over
+// 30 Hz–10 kHz. Works for kicks that are punchy/broadband (rawstyle) as well as for clean "boomy" ones.
+// (A bass-only detector fails on rawstyle: the reverse bass swells up right before each kick, so the
+// low end gets *quieter* when the kick hits.)
+export function spectralFlux(x, sr, { hop = 256, frame = 1024 } = {}) {
+  const nFrames = Math.max(0, Math.floor((x.length - frame) / hop) + 1);
+  const win = new Float64Array(frame);
+  for (let i = 0; i < frame; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / frame);
+  const kLo = Math.max(1, Math.round(30 * frame / sr)), kHi = Math.min(frame / 2, Math.round(10000 * frame / sr));
+  const re = new Float64Array(frame), im = new Float64Array(frame);
+  let prev = new Float32Array(kHi - kLo + 1), cur = new Float32Array(kHi - kLo + 1);
   const flux = new Float32Array(nFrames);
-  for (let f = 1; f < nFrames; f++) flux[f] = Math.max(0, logEnv[f] - logEnv[f - 1]);
-  return { flux, hop, frame };
+  const norm = 2 / frame; // so a full-scale sine is ~1
+  for (let f = 0; f < nFrames; f++) {
+    const s = f * hop;
+    for (let i = 0; i < frame; i++) { re[i] = x[s + i] * win[i]; im[i] = 0; }
+    fft(re, im);
+    let sum = 0;
+    for (let k = kLo; k <= kHi; k++) {
+      const m = Math.log1p(100 * norm * Math.hypot(re[k], im[k]));
+      cur[k - kLo] = m;
+      if (f > 0) { const d = m - prev[k - kLo]; if (d > 0) sum += d; }
+    }
+    flux[f] = sum;
+    const t = prev; prev = cur; cur = t;
+  }
+  // a change shows up once it is inside the window's centre region -> onset ~ frame centre
+  return { flux, hop, offset: frame / 2 };
 }
 
 // ---------------------------------------------------------------- 2. tempo + beat grid
@@ -157,7 +172,7 @@ function estimatePeriodFrames(flux, framesPerSec) {
 }
 
 export function detectKicks(x, sr) {
-  const { flux, hop } = lowBandFlux(x, sr);
+  const { flux, hop, offset } = spectralFlux(x, sr);
   const fps = sr / hop;
   const p0 = estimatePeriodFrames(flux, fps); // frames
 
@@ -181,7 +196,7 @@ export function detectKicks(x, sr) {
   // Precise tempo + phase: maximise |sum w * exp(2*pi*i*t/P)| over P near the autocorrelation estimate.
   // This is a circular "periodogram" over the onset times; it is far more precise than the
   // autocorrelation lag, which matters because a 0.1 BPM error drifts by half a beat over a track.
-  const times = strong.map(f => f * hop + hop); // samples (onset sits in the 2nd half of the rising frame)
+  const times = strong.map(f => f * hop + offset); // samples
   const w = strong.map(f => flux[f]);
   const P0 = p0 * hop;
   const span = times[times.length - 1] - times[0];
@@ -206,7 +221,7 @@ export function detectKicks(x, sr) {
   const perBeat = new Map();
   for (const f of peaks) {
     if (flux[f] < lowThr) continue;
-    const t = f * hop + hop;
+    const t = f * hop + offset;
     const pos = (t - t0) / bestP;
     const beat = Math.round(pos);
     if (Math.abs(pos - beat) > 0.12) continue;
@@ -412,13 +427,37 @@ export function tailPitch(sig, sr) {
   return best * binHz;
 }
 
-function finishSample(sig, sr) {
-  // trim leading silence to ~2 ms before the transient
+// Kick start = the sharpest 2 ms rise in loudness within -20/+15 ms of where we expect it.
+// (A plain threshold fails when a reverse bass swells up right before the kick and is still in the
+// pre-roll: it would trigger on the bass instead.)
+function findOnset(sig, sr, hint) {
+  const w = Math.max(1, Math.round(0.001 * sr));
+  const n = Math.floor(sig.length / w);
+  const env = new Float64Array(n);
+  for (let b = 0; b < n; b++) {
+    let e = 0;
+    for (let i = b * w; i < (b + 1) * w; i++) e += sig[i] * sig[i];
+    env[b] = Math.sqrt(e / w);
+  }
+  const lo = Math.max(0, Math.floor((hint - 0.02 * sr) / w));
+  const hi = Math.min(n - 3, Math.floor((hint + 0.015 * sr) / w));
+  let best = lo, bv = -Infinity;
+  for (let b = lo; b <= hi; b++) { const r = env[b + 2] - env[b]; if (r > bv) { bv = r; best = b; } }
+  return best * w;
+}
+
+function finishSample(sig, sr, onsetHint = null) {
   let peak = 0;
   for (const v of sig) peak = Math.max(peak, Math.abs(v));
-  let on = 0;
-  while (on < sig.length && Math.abs(sig[on]) < 0.05 * peak) on++;
-  const start = Math.max(0, on - Math.round(0.002 * sr));
+  let start;
+  if (onsetHint != null) {
+    start = Math.max(0, findOnset(sig, sr, onsetHint) - Math.round(0.002 * sr));
+  } else {
+    // no hint (e.g. the off-beat part): start shortly before the first strong sample
+    let on = 0;
+    while (on < sig.length && Math.abs(sig[on]) < 0.25 * peak) on++;
+    start = Math.max(0, on - Math.round(0.004 * sr));
+  }
   const out = sig.slice(start);
   // 0.5 ms fade-in, 10 ms fade-out, normalise to -0.3 dBFS
   const fi = Math.max(1, Math.round(0.0005 * sr)), fo = Math.max(1, Math.round(0.01 * sr));
@@ -428,6 +467,103 @@ function finishSample(sig, sr) {
   for (const v of out) p = Math.max(p, Math.abs(v));
   if (p > 0) { const g = Math.pow(10, -0.3 / 20) / p; for (let i = 0; i < out.length; i++) out[i] *= g; }
   return { sig: out, trim: start };
+}
+
+// Where does the kick end and the off-beat sound (reverse bass etc.) begin? Rawstyle kicks are hard-cut
+// right before the off-beat, which leaves a short, near-silent gap. Returns a sample index or null.
+export function findSplit(sig, sr) {
+  const w = Math.max(1, Math.round(0.002 * sr));
+  const n = Math.floor(sig.length / w);
+  if (n < 20) return null;
+  const env = new Float64Array(n);
+  let mx = 0;
+  for (let b = 0; b < n; b++) {
+    let e = 0;
+    for (let i = b * w; i < (b + 1) * w; i++) e += sig[i] * sig[i];
+    env[b] = Math.sqrt(e / w);
+    mx = Math.max(mx, env[b]);
+  }
+  let best = -1, bv = Infinity;
+  for (let b = Math.floor(n * 0.2); b < Math.floor(n * 0.85); b++) if (env[b] < bv) { bv = env[b]; best = b; }
+  return best >= 0 && bv < 0.06 * mx ? best * w + (w >> 1) : null;
+}
+
+// Highest normalised cross-correlation between two signals within +-maxLag samples.
+function bestCorr(a, b, maxLag) {
+  const L = Math.min(a.length, b.length) - 2 * maxLag;
+  if (L <= 0) return 0;
+  let best = -1;
+  for (let lag = -maxLag; lag <= maxLag; lag++) {
+    let ab = 0, aa = 0, bb = 0;
+    for (let i = maxLag; i < maxLag + L; i++) {
+      const p = a[i], q = b[i + lag];
+      ab += p * q; aa += p * p; bb += q * q;
+    }
+    if (aa > 0 && bb > 0) best = Math.max(best, ab / Math.sqrt(aa * bb));
+  }
+  return best;
+}
+
+// Align, level-match and average one group of hits.
+function summarizeGroup(rawTimes, { x, sr, pre, len, refLen, maxLag, nClean }) {
+  // Align within the group: different kick variants have different shapes, so a reference built
+  // from all kicks at once would be mush. Each pass re-builds the group median and re-aligns to it.
+  let t = rawTimes.slice();
+  if (t.length >= 3) t = alignTimes(x, t, { pre, refLen, maxLag, iterations: 3 });
+  const starts = t.map(v => v - pre);
+
+  // level-match every hit to the group median before averaging (intro kicks are often quieter)
+  const m0 = medianOfSegments(x, starts, len);
+  const mm = dot(m0, 0, m0, 0, len) || 1;
+  const gains = starts.map(s => {
+    const g = dot(x, s, m0, 0, len) / mm;
+    return g > 0.2 ? g : 1;
+  });
+  const medianRaw = t.length >= 3 ? medianOfSegments(x, starts, len, gains) : m0;
+  const meanRaw = meanOfSegments(x, starts, len, gains);
+
+  // cleanliness = how much of each single hit is explained by the group median (1 = identical shape)
+  const m2 = dot(medianRaw, 0, medianRaw, 0, len);
+  const scored = starts.map((s, j) => {
+    const xx = dot(x, s, x, s, len), xm = dot(x, s, medianRaw, 0, len);
+    return { j, time: t[j] / sr, match: xx > 0 && m2 > 0 ? (xm * xm) / (xx * m2) : 0 };
+  }).sort((a, b) => b.match - a.match);
+  const meanMatch = scored.reduce((a, s) => a + s.match, 0) / scored.length;
+
+  const med = finishSample(medianRaw, sr, pre);
+  const mean = finishSample(meanRaw, sr, pre);
+
+  let parts = null;
+  const split = findSplit(med.sig, sr);
+  if (split != null) {
+    parts = {
+      splitAt: split / med.sig.length,
+      kick: finishSample(med.sig.slice(0, split), sr).sig,
+      offbeat: finishSample(med.sig.slice(split), sr).sig,
+    };
+  }
+  const pitch = tailPitch(parts ? parts.kick : med.sig, sr);
+  const cleanest = scored.slice(0, nClean).map(s => ({
+    time: s.time,
+    match: s.match,
+    sig: finishSample(x.slice(starts[s.j], starts[s.j] + len), sr, pre).sig,
+  }));
+  return {
+    count: t.length,
+    times: t.map(v => v / sr),
+    median: med.sig,
+    mean: mean.sig,
+    parts,
+    tailHz: pitch,
+    note: pitch ? noteName(pitch) : null,
+    meanMatch,
+    rms: Math.sqrt(m2 / len),
+    quality: meanMatch * Math.min(1, t.length / 32), // re-weighted by loudness in analyze()
+    noisy: meanMatch < 0.2 || t.length < 4,
+    cleanest,
+    medianRaw,
+    rawTimes,
+  };
 }
 
 // ---------------------------------------------------------------- full pipeline
@@ -442,9 +578,11 @@ export function analyze(x, sr, opts = {}, onProgress = () => {}) {
   onProgress('Finding kicks', 0.05);
   const det = detectKicks(x, sr);
 
-  const pre = Math.round(0.010 * sr);
-  const maxLag = Math.round(0.010 * sr);
-  const refLen = Math.round(0.046 * sr);
+  // Detected onsets can be ~10–15 ms late (the onset function reacts once the attack is inside the
+  // analysis frame), so keep a generous pre-roll; finishSample() trims the silence again later.
+  const pre = Math.round(0.025 * sr);
+  const maxLag = Math.round(0.020 * sr);
+  const refLen = Math.round(0.080 * sr);
   const autoLen = Math.min(0.6 * sr, 0.95 * det.periodSamples);
   const len = Math.round(opts.lengthMs ? opts.lengthMs / 1000 * sr : autoLen) + pre;
 
@@ -452,9 +590,6 @@ export function analyze(x, sr, opts = {}, onProgress = () => {}) {
   const margin = pre + maxLag + 2;
   let times = det.times.filter(t => t - margin >= 0 && t + len + maxLag < x.length);
   if (times.length < 8) throw new Error('Too few kicks found to build an average.');
-
-  onProgress('Aligning', 0.25);
-  times = alignTimes(x, times, { pre, refLen, maxLag });
 
   // Throw out "kicks" that aren't bass-heavy (chord changes etc. that happened to land on the grid).
   // A real hardstyle kick puts most of its energy below ~200 Hz.
@@ -464,76 +599,63 @@ export function analyze(x, sr, opts = {}, onProgress = () => {}) {
     const e = dot(x, s, x, s, L);
     return e > 0 ? dot(lp, s, lp, s, L) / e : 0;
   });
-  const shareCut = 0.5 * percentile(lowShare, 0.5);
+  const shareCut = 0.2 * percentile(lowShare, 0.5); // distorted rawstyle kicks can have only ~25 % below 200 Hz
   const rejected = times.filter((_, i) => lowShare[i] < shareCut).map(t => t / sr);
   times = times.filter((_, i) => lowShare[i] >= shareCut);
   if (times.length < 8) throw new Error('Too few kicks found to build an average.');
 
-  onProgress('Grouping kick types', 0.45);
+  onProgress('Grouping kick types', 0.3);
   let feats = kickFeatures(x, times.map(t => t - pre), len, sr);
   // centre each dimension (dB values keep their natural scale)
   const d = feats[0].length;
   const mu = new Float64Array(d);
   for (const f of feats) for (let j = 0; j < d; j++) mu[j] += f[j] / feats.length;
   feats = feats.map(f => f.map((v, j) => v - mu[j]));
-  const k = opts.k || chooseK(feats);
-  const labels = k === 1 ? new Int32Array(times.length) : kmeans(feats, k);
 
-  onProgress('Averaging', 0.65);
-  const groups = [];
+  // Auto mode: deliberately over-cluster, then merge groups whose averaged sounds turn out (nearly)
+  // identical. Picking k up front (silhouette etc.) proved unreliable on real tracks, where the clean
+  // drop kick is easily lumped together with melodic sections that just have a sub bass under the kick.
+  const auto = !opts.k;
+  const k = auto ? Math.min(8, Math.max(2, Math.floor(times.length / 20))) : opts.k;
+  const labels = k === 1 ? new Int32Array(times.length) : kmeans(feats, k);
+  let groups = [];
   for (let c = 0; c < k; c++) {
     const idx = [];
     for (let i = 0; i < times.length; i++) if (labels[i] === c) idx.push(i);
-    if (idx.length) groups.push(idx);
+    if (idx.length) groups.push(idx.map(i => times[i]));
   }
-  groups.sort((a, b) => b.length - a.length);
 
-  const nClean = opts.nCleanest ?? 3;
-  const clusters = groups.map((idx, gi) => {
-    // re-align within the group (different kick variants have different shapes)
-    let t = idx.map(i => times[i]);
-    if (t.length >= 3) t = alignTimes(x, t, { pre, refLen, maxLag: Math.round(0.003 * sr), iterations: 1 });
-    const starts = t.map(v => v - pre);
-
-    // level-match every hit to the group median before averaging (intro kicks are often quieter)
-    const m0 = medianOfSegments(x, starts, len);
-    const mm = dot(m0, 0, m0, 0, len) || 1;
-    const gains = starts.map(s => {
-      const g = dot(x, s, m0, 0, len) / mm;
-      return g > 0.2 ? g : 1;
-    });
-    const medianRaw = t.length >= 3 ? medianOfSegments(x, starts, len, gains) : m0;
-    const meanRaw = meanOfSegments(x, starts, len, gains);
-
-    // cleanliness = how much of each single hit is explained by the group median (1 = identical shape)
-    const scored = starts.map((s, j) => {
-      const xx = dot(x, s, x, s, len), xm = dot(x, s, medianRaw, 0, len), m2 = dot(medianRaw, 0, medianRaw, 0, len);
-      return { j, time: t[j] / sr, match: xx > 0 && m2 > 0 ? (xm * xm) / (xx * m2) : 0 };
-    }).sort((a, b) => b.match - a.match);
-
-    const med = finishSample(medianRaw, sr);
-    const mean = finishSample(meanRaw, sr);
-    const pitch = tailPitch(med.sig, sr);
-    const cleanest = scored.slice(0, nClean).map(s => ({
-      time: s.time,
-      match: s.match,
-      sig: finishSample(x.slice(starts[s.j], starts[s.j] + len), sr).sig,
-    }));
-    onProgress('Averaging', 0.65 + 0.35 * (gi + 1) / groups.length);
-    return {
-      count: t.length,
-      times: t.map(v => v / sr),
-      median: med.sig,
-      mean: mean.sig,
-      tailHz: pitch,
-      note: pitch ? noteName(pitch) : null,
-      meanMatch: scored.reduce((a, s) => a + s.match, 0) / scored.length,
-      cleanest,
-    };
+  const ctx = { x, sr, pre, len, refLen, maxLag, nClean: opts.nCleanest ?? 3 };
+  onProgress('Averaging', 0.45);
+  let summaries = groups.map((g, gi) => {
+    onProgress('Averaging', 0.45 + 0.35 * gi / groups.length);
+    return summarizeGroup(g, ctx);
   });
 
+  if (auto) {
+    onProgress('Merging similar groups', 0.85);
+    for (let round = 0; round < 6; round++) {
+      let best = null;
+      for (let i = 0; i < summaries.length; i++) for (let j = i + 1; j < summaries.length; j++) {
+        const c = bestCorr(summaries[i].medianRaw, summaries[j].medianRaw, Math.round(0.005 * sr));
+        if (c > 0.85 && (!best || c > best.c)) best = { i, j, c };
+      }
+      if (!best) break;
+      const merged = summarizeGroup([...summaries[best.i].rawTimes, ...summaries[best.j].rawTimes].sort((p, q) => p - q), ctx);
+      summaries = summaries.filter((_, n) => n !== best.i && n !== best.j);
+      summaries.push(merged);
+    }
+  }
+
+  // Best first: consistent groups with enough hits, weighted by loudness. In hardstyle the drop kick is
+  // the loudest thing in the track, while melodic sections have a quieter kick buried in sub bass.
+  const maxRms = Math.max(...summaries.map(g => g.rms)) || 1;
+  for (const g of summaries) g.quality *= Math.sqrt(g.rms / maxRms);
+  summaries.sort((p, q) => (p.noisy - q.noisy) || (q.quality - p.quality));
+  const clusters = summaries.map(({ medianRaw, rawTimes, rms, ...rest }) => rest);
+
   return {
-    bpm: det.bpm, sampleRate: sr, k, totalKicks: times.length, rejected, clusters,
+    bpm: det.bpm, sampleRate: sr, k: clusters.length, totalKicks: times.length, rejected, clusters,
     windowPre: pre / sr, windowLen: len / sr, // each hit's window is [time - windowPre, time - windowPre + windowLen]
   };
 }
