@@ -24,6 +24,7 @@ function selectTab(name) {
   });
   document.querySelectorAll('.tab-panel').forEach((p) => { p.hidden = p.id !== 'tab-' + name; });
   document.body.dataset.tab = name;
+  $('#toast').classList.remove('show');
   stopPreview();
   if (name === 'extract') redraw();
   window.scrollTo({ top: 0 });

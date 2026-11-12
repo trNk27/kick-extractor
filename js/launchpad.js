@@ -187,9 +187,6 @@ function render() {
   }
   const n = state.pads.filter(Boolean).length;
   $('#lpEmpty').hidden = n > 0;
-  const used = new Set(state.pads.filter(Boolean).map((id) => itemById(id)?.category));
-  $('#lpLegend').innerHTML = Object.entries(CATEGORIES).map(([k, c]) =>
-    `<span class="key-item${used.has(k) ? ' used' : ''}" style="--pc:${c.color}"><i></i>${c.label}</span>`).join('');
 }
 
 // ---------------------------------------------------------------- pick-a-pad window
@@ -277,22 +274,19 @@ export async function initLaunchpad() {
     editing = !editing;
     $('#lpGrid').classList.toggle('editing', editing);
     e.currentTarget.setAttribute('aria-pressed', editing);
-    e.currentTarget.textContent = editing ? 'Done' : 'Edit pads';
-    $('#lpHint').textContent = editing
-      ? 'Tap a pad to take its sample off. It stays in your library.'
-      : 'Tap the pads, or play them with your keyboard.';
+    e.currentTarget.textContent = editing ? 'Done' : 'Edit';
   });
   const clear = $('#lpClear');
   clear.addEventListener('click', () => {
     if (!clear.classList.contains('confirm')) {
       clear.classList.add('confirm');
-      clear.textContent = 'Tap again to clear';
-      setTimeout(() => { clear.classList.remove('confirm'); clear.textContent = 'Clear pads'; }, 2500);
+      clear.textContent = 'Sure?';
+      setTimeout(() => { clear.classList.remove('confirm'); clear.textContent = 'Clear'; }, 2500);
       return;
     }
     stopAll();
     clear.classList.remove('confirm');
-    clear.textContent = 'Clear pads';
+    clear.textContent = 'Clear';
     clearPads();
   });
 

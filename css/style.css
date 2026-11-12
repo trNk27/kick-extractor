@@ -235,29 +235,53 @@ canvas { display: block; width: 100%; }
 .how li { margin: 8px 0; }
 .how b { color: var(--text); font-weight: 600; }
 
-/* ---------- Launchpad */
-.lp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
-.lp-hint { color: var(--muted); margin: 0; font-size: 14px; }
-.lp-tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 16px; }
+/* ---------- Launchpad: one screen, no scrolling. The device takes whatever height is left. */
+body[data-tab="launchpad"] {
+  height: 100vh; height: 100dvh; overflow: hidden; padding-bottom: 0;
+  display: flex; flex-direction: column;
+}
+body[data-tab="launchpad"] .masthead { margin-bottom: 12px; flex: none; }
+body[data-tab="launchpad"] .brand { text-align: center; }
+body[data-tab="launchpad"] main {
+  flex: 1 1 auto; min-height: 0; width: 100%;
+  padding-bottom: calc(56px + 14px + env(safe-area-inset-bottom));
+}
+#tab-launchpad:not([hidden]) { height: 100%; container-type: size; display: grid; place-items: center; }
 
 .lp-device {
   --notch: 22px;
-  max-width: 540px; margin: 0 auto; padding: 0 16px 18px;
+  /* square grid + top band (~44px) + bottom padding: fit both the width and the height left over */
+  width: min(560px, 100cqw, calc(100cqh - 52px));
+  container: device / inline-size;
+  padding: 0 14px 14px;
   background: #10162c;
   border-color: #2a3666;
 }
 .lp-device::after { background: #2a3666; }
 .lp-top { /* the ridged band of the PS2 case */
-  display: flex; justify-content: space-between; align-items: center;
-  margin: 0 -16px 16px; padding: 10px 16px;
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 -14px 14px; padding: 7px 26px 7px 14px;
   background: repeating-linear-gradient(to bottom, #161e3c 0 3px, #0c1226 3px 5px);
   border-bottom: 1px solid #2a3666;
 }
 .lp-brand { font-family: var(--display); font-size: 12px; letter-spacing: .14em; color: var(--muted); }
-.lp-leds { display: flex; gap: 7px; margin-right: 18px; }
+.lp-leds { display: flex; gap: 6px; }
 .lp-led { width: 8px; height: 8px; background: #252e55; }
 .lp-led.on { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
 .lp-led:first-child.on { background: #fff; box-shadow: 0 0 8px #fff; }
+.lp-hw { margin-left: auto; display: flex; gap: 5px; }
+.hw { /* small hardware buttons */
+  border: 1px solid #3a4780; border-radius: 2px; cursor: pointer;
+  background: #1b2449; color: var(--muted);
+  font-size: 12px; font-weight: 600; line-height: 1; padding: 6px 9px;
+  box-shadow: inset 0 1px 0 #ffffff14, inset 0 -2px 0 #0006;
+}
+.hw:hover { color: var(--text); }
+.hw:active { transform: translateY(1px); box-shadow: inset 0 1px 0 #0006; }
+.hw[aria-pressed="true"] { background: var(--text); color: var(--void); border-color: var(--text); }
+.hw.confirm { border-color: var(--red); color: #ff9a80; }
+.lp-empty { margin: -6px 0 10px; color: var(--dim); font-size: 13px; }
+.lp-empty[hidden] { display: none; }
 
 .lp-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .pad {
@@ -303,12 +327,6 @@ canvas { display: block; width: 100%; }
   font-size: 11px; font-weight: 700; background: #0a0d18; color: #fff; padding: 2px 5px;
 }
 
-.lp-empty { text-align: center; color: var(--muted); margin: 18px auto 0; max-width: 46ch; }
-.lp-key { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; margin: 20px 0 0; font-size: 13px; }
-.key-item { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
-.key-item i { width: 10px; height: 10px; background: var(--pc); opacity: .35; }
-.key-item.used { color: var(--text); }
-.key-item.used i { opacity: 1; }
 
 /* ---------- Library */
 .lib-head { display: flex; align-items: baseline; gap: 14px; }
@@ -461,8 +479,10 @@ canvas { display: block; width: 100%; }
   .singles li { grid-template-columns: auto auto 1fr; }
   .snip-list { padding: 0 12px; }
   .snip { grid-template-columns: 1fr; gap: 8px; }
-  .lp-device { padding: 0 10px 12px; }
-  .lp-top { margin: 0 -10px 12px; padding: 8px 12px; }
+  .lp-device { padding: 0 10px 10px; width: min(560px, 100cqw, calc(100cqh - 46px)); }
+  .lp-top { margin: 0 -10px 10px; padding: 6px 24px 6px 10px; gap: 8px; }
+  .lp-brand { font-size: 11px; letter-spacing: .08em; }
+  .hw { padding: 6px 7px; }
   .lp-grid { gap: 7px; }
   .pad { padding: 6px; }
   .pad-key { display: none; }
@@ -470,4 +490,26 @@ canvas { display: block; width: 100%; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* short screens (phones held sideways): give the pads the height */
+@media (max-height: 620px) {
+  body[data-tab="launchpad"] #scene, body[data-tab="launchpad"] .masthead::before { height: 56px; }
+  body[data-tab="launchpad"] .brand { padding-top: 8px; }
+  body[data-tab="launchpad"] .masthead { margin-bottom: 8px; }
+}
+@media (max-height: 460px) {
+  body[data-tab="launchpad"] #scene, body[data-tab="launchpad"] .masthead::before { display: none; }
+  body[data-tab="launchpad"] .wordmark { font-size: 16px; padding-bottom: 8px; }
+  body[data-tab="launchpad"] main { padding-bottom: calc(56px + 8px + env(safe-area-inset-bottom)); }
+}
+
+/* a small device (phone held sideways): drop the brand label and the small pad captions */
+@container device (max-width: 330px) {
+  .lp-brand, .pad-meta, .pad-key { display: none; }
+  .lp-top { padding-right: 22px; }
+  .hw { padding: 5px 6px; font-size: 11px; }
+  .lp-grid { gap: 6px; }
+  .pad { padding: 5px; }
+  .pad-name { font-size: 11px; }
 }

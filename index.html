@@ -94,25 +94,19 @@
 
     <!-- ============================== LAUNCHPAD ============================== -->
     <section class="tab-panel" id="tab-launchpad" aria-label="Launchpad" hidden>
-      <div class="lp-head">
-        <h2>Launchpad</h2>
-        <p class="lp-hint" id="lpHint">Tap the pads, or play them with your keyboard.</p>
-      </div>
-      <div class="lp-tools">
-        <button class="btn" id="lpStop" title="Space">Stop all</button>
-        <button class="btn" id="lpEdit" aria-pressed="false">Edit pads</button>
-        <button class="btn danger" id="lpClear">Clear pads</button>
-      </div>
       <div class="lp-device notch">
         <div class="lp-top">
           <span class="lp-brand">KXP-16</span>
           <span class="lp-leds" aria-hidden="true"><i class="lp-led"></i><i class="lp-led"></i><i class="lp-led"></i><i class="lp-led"></i></span>
+          <span class="lp-hw">
+            <button class="hw" id="lpStop" title="Stop everything (Space)">Stop</button>
+            <button class="hw" id="lpEdit" aria-pressed="false" title="Take samples off pads">Edit</button>
+            <button class="hw" id="lpClear" title="Take every sample off the pads">Clear</button>
+          </span>
         </div>
+        <p class="lp-empty" id="lpEmpty">Empty. Add sounds with +LP in Extract.</p>
         <div class="lp-grid" id="lpGrid"></div>
       </div>
-      <p class="lp-empty" id="lpEmpty">The pads are empty. Load a track in Extract and press <span class="lp-add demo">+LP</span> next to a kick or a loop.</p>
-      <div class="lp-key" id="lpLegend"></div>
-      <p class="section-note centre">Loops start on the next beat of whatever is already looping, so they stay in time. Space stops everything.</p>
     </section>
 
     <!-- ============================== LIBRARY ============================== -->
