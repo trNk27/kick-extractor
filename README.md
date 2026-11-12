@@ -30,6 +30,12 @@ Tested on a synthetic track (`test/`) and on Sickmode & Rooler – *Too Cold* (1
 **Limits:** you get the kick as it sounds in the finished master, not the dry sample, and anything
 that hits exactly with the kick every time (layered clap, a reverse bass right behind it) stays in.
 
+## Downloads
+
+Every result downloads as WAV (24-bit) or MP3 (320 kbps, encoded in the browser with
+[lamejs](https://github.com/zhuker/lamejs), LGPL-3.0, vendored in `vendor/`). MP3 always adds ~25 ms of
+silence at the start (encoder delay), so WAV is the better choice for putting kicks into a DAW.
+
 ## Files
 
 ```
@@ -38,6 +44,7 @@ css/style.css
 js/app.js        UI logic: decoding, drawing, playback, WAV download
 js/worker.js     runs the analysis in a Web Worker
 js/dsp.js        all signal processing (pure functions, also runs in Node)
+vendor/          lamejs MP3 encoder (loaded only when an MP3 is requested)
 test/synth-test.mjs   synthetic hardstyle track with known kicks -> checks the pipeline
 ```
 

@@ -151,6 +151,7 @@ canvas { display: block; width: 100%; }
 .dl:hover { border-color: var(--c); }
 .dl small { color: var(--muted); font-weight: 400; margin-left: 2px; }
 .dl.small { padding: 4px 9px; font-size: 12px; }
+.dls { display: flex; gap: 6px; }
 
 .singles { margin-top: 10px; font-size: 13px; }
 .singles summary { cursor: pointer; color: var(--muted); }

@@ -112,15 +112,68 @@ function play(sig, sr, btn) {
 
 // ------------------------------------------------------------------ downloads
 
-function download(sig, sr, filename) {
-  const blob = new Blob([encodeWav(sig, sr)], { type: 'audio/wav' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+// Lazily load the MP3 encoder (lamejs, a JS port of LAME) the first time someone wants an MP3.
+let lameLoading = null;
+function loadLame() {
+  if (window.lamejs) return Promise.resolve(window.lamejs);
+  lameLoading ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = new URL('../vendor/lame.min.js', import.meta.url).href;
+    s.onload = () => resolve(window.lamejs);
+    s.onerror = () => { lameLoading = null; reject(new Error('Could not load the MP3 encoder.')); };
+    document.head.appendChild(s);
+  });
+  return lameLoading;
+}
+
+async function encodeMp3(sig, sr) {
+  const lame = await loadLame();
+  const enc = new lame.Mp3Encoder(1, sr, 320);
+  const pcm = new Int16Array(sig.length);
+  for (let i = 0; i < sig.length; i++) {
+    const v = Math.max(-1, Math.min(1, sig[i]));
+    pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  const chunks = [];
+  for (let i = 0; i < pcm.length; i += 1152) {
+    const b = enc.encodeBuffer(pcm.subarray(i, i + 1152));
+    if (b.length) chunks.push(b);
+  }
+  const end = enc.flush();
+  if (end.length) chunks.push(end);
+  return new Blob(chunks, { type: 'audio/mpeg' });
+}
+
+async function download(sig, sr, filenameBase, format) {
+  try {
+    const blob = format === 'mp3'
+      ? await encodeMp3(sig, sr)
+      : new Blob([encodeWav(sig, sr)], { type: 'audio/wav' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${filenameBase}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (err) {
+    showError(err.message || String(err));
+  }
+}
+
+// "⬇ WAV  ⬇ MP3" button pair
+function dlButtons(sig, sr, filenameBase) {
+  const wrap = document.createElement('span');
+  wrap.className = 'dls';
+  for (const fmt of ['wav', 'mp3']) {
+    const b = document.createElement('button');
+    b.className = 'dl small dl-' + fmt;
+    b.textContent = '⬇ ' + fmt.toUpperCase();
+    if (fmt === 'mp3') b.title = 'MP3 adds ~25 ms of silence at the start (encoder delay). Use WAV for producing.';
+    b.onclick = () => download(sig, sr, filenameBase, fmt);
+    wrap.appendChild(b);
+  }
+  return wrap;
 }
 
 const safe = (s) => s.replace(/[^\w\-]+/g, '_').replace(/_+/g, '_').slice(0, 60);
@@ -274,10 +327,9 @@ function render() {
       const li = document.createElement('li');
       if (p.main) li.className = 'main';
       li.innerHTML = `<button class="play small" aria-label="Play">▶</button>` +
-        `<span class="label"><b>${p.label}</b><small>${p.hint ? p.hint + ' · ' : ''}${ms(p.sig)}</small></span>` +
-        `<button class="dl small">⬇ WAV</button>`;
+        `<span class="label"><b>${p.label}</b><small>${p.hint ? p.hint + ' · ' : ''}${ms(p.sig)}</small></span>`;
       li.querySelector('.play').onclick = (e) => play(p.sig, sr, e.currentTarget);
-      li.querySelector('.dl').onclick = () => download(p.sig, sr, `${base}_${p.file}.wav`);
+      li.appendChild(dlButtons(p.sig, sr, `${base}_${p.file}`));
       pl.appendChild(li);
     }
 
@@ -286,10 +338,9 @@ function render() {
       const li = document.createElement('li');
       li.innerHTML = `<button class="play small" aria-label="Play">▶</button>` +
         `<span class="t">${fmtTime(hit.time)}</span>` +
-        `<span class="m" title="How closely this hit matches the averaged kick">${(hit.match * 100).toFixed(1)}% match</span>` +
-        `<button class="dl small">⬇ WAV</button>`;
+        `<span class="m" title="How closely this hit matches the averaged kick">${(hit.match * 100).toFixed(1)}% match</span>`;
       li.querySelector('.play').onclick = (e) => play(hit.sig, sr, e.currentTarget);
-      li.querySelector('.dl').onclick = () => download(hit.sig, sr, `${base}_hit${hi + 1}_${hit.time.toFixed(2)}s.wav`);
+      li.appendChild(dlButtons(hit.sig, sr, `${base}_hit${hi + 1}_${hit.time.toFixed(2)}s`));
       ul.appendChild(li);
     });
 
