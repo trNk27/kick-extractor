@@ -2,154 +2,197 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Kick Extractor</title>
-  <meta name="description" content="Pull the kick out of a hardstyle track, right in your browser.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23ff4b5c'/%3E%3Cpath d='M6 17h5l2-7 3 13 2-9 2 3h6' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <meta name="description" content="Pull the kick out of a hardstyle track and play it on pads. Runs in your browser.">
+  <meta name="theme-color" content="#070a16">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%23070a16'/%3E%3Crect x='3' y='3' width='10' height='2' fill='%23ffd23a'/%3E%3Crect x='3' y='6' width='10' height='2' fill='%23ffa21f'/%3E%3Crect x='3' y='9' width='10' height='2' fill='%23ff6a2a'/%3E%3Crect x='3' y='12' width='10' height='1' fill='%23ff3d6e'/%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/michroma-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/chakra-petch-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
-  <main>
-    <header class="top">
-      <h1>Kick<span>Extractor</span></h1>
-      <p class="sub">Drop a hardstyle track. Every kick gets lined up and averaged until only the kick is left. Runs entirely in your browser; the file never leaves your device.</p>
-    </header>
-
-    <nav class="tabs" role="tablist" aria-label="Sections">
-      <button class="tab" role="tab" data-tab="extract" aria-selected="true">Extraction</button>
-      <button class="tab" role="tab" data-tab="launchpad" aria-selected="false" tabindex="-1">Launchpad <span class="badge" id="lpCount" hidden>0</span></button>
-      <span class="tab-ink" aria-hidden="true"></span>
-    </nav>
-
-    <section class="tab-panel" id="tab-extract" role="tabpanel">
-    <label class="drop" id="drop">
-      <input type="file" id="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a" hidden>
-      <span class="drop-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 16V4m0 0-5 5m5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </span>
-      <span class="drop-text"><strong>Choose an MP3</strong> or drop it here</span>
-      <span class="drop-name" id="fileName"></span>
-    </label>
-
-    <section class="settings" aria-label="Settings">
-      <label>Kick types
-        <select id="optK">
-          <option value="">Auto</option>
-          <option>1</option><option>2</option><option>3</option>
-          <option>4</option><option>5</option><option>6</option>
-          <option>7</option><option>8</option>
-        </select>
-      </label>
-      <label>Length
-        <select id="optLen">
-          <option value="">Auto (≈ 1 beat)</option>
-          <option value="200">200 ms</option><option value="300">300 ms</option>
-          <option value="400">400 ms</option><option value="500">500 ms</option>
-          <option value="600">600 ms</option><option value="800">800 ms</option>
-        </select>
-      </label>
-    </section>
-
-    <div class="status" id="status" hidden>
-      <div class="status-label" id="statusLabel">Working…</div>
-      <div class="bar"><div class="bar-fill" id="statusBar"></div></div>
+<body data-tab="extract">
+  <header class="masthead">
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <div class="brand">
+      <h1 class="wordmark">Kick Extractor</h1>
+      <p class="tagline">Pull the kick out of a hardstyle track, then play it on pads. Everything runs in your browser; your music never leaves this device.</p>
     </div>
-    <div class="error" id="error" hidden></div>
+  </header>
 
-    <section id="results" hidden>
-      <div class="summary" id="summary"></div>
-      <figure class="overview">
-        <canvas id="overview"></canvas>
-        <button class="play" id="playSong" aria-label="Play song">▶</button>
-      </figure>
-      <div id="rows"></div>
-      <section class="snippets" id="snippetSection" hidden>
-        <h2>Song snippets <small>bar-aligned, ready for the Launchpad</small></h2>
-        <div class="snip-grid" id="snippets"></div>
+  <main>
+    <!-- ============================== EXTRACT ============================== -->
+    <section class="tab-panel" id="tab-extract" aria-label="Extract">
+      <label class="load notch" id="drop">
+        <input type="file" id="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a" hidden>
+        <span class="load-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 15V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v5h16v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+        </span>
+        <span class="load-text"><b>Load a track</b><span>MP3, WAV or FLAC. Or drop the file here.</span></span>
+        <span class="load-name" id="fileName"></span>
+      </label>
+
+      <div class="settings">
+        <label>Kick types
+          <select id="optK">
+            <option value="">Auto</option>
+            <option>1</option><option>2</option><option>3</option><option>4</option>
+            <option>5</option><option>6</option><option>7</option><option>8</option>
+          </select>
+        </label>
+        <label>Kick length
+          <select id="optLen">
+            <option value="">Auto (one beat)</option>
+            <option value="200">200 ms</option><option value="300">300 ms</option>
+            <option value="400">400 ms</option><option value="500">500 ms</option>
+            <option value="600">600 ms</option><option value="800">800 ms</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="status" id="status" hidden>
+        <div class="status-label" id="statusLabel">Working…</div>
+        <div class="bar"><div class="bar-fill" id="statusBar"></div></div>
+      </div>
+      <div class="error" id="error" role="alert" hidden></div>
+
+      <section id="results" hidden>
+        <div class="summary" id="summary"></div>
+        <figure class="overview notch">
+          <canvas id="overview"></canvas>
+          <button class="play" id="playSong" aria-label="Play the whole track">▶</button>
+        </figure>
+        <p class="overview-key">Coloured stretches are kicks, by type. The bars along the top mark the song snippets.</p>
+
+        <div id="rows"></div>
+
+        <section class="snippets" id="snippetSection" hidden>
+          <h2>Song snippets</h2>
+          <p class="section-note">Cut on bar lines, so the loops repeat in time on the Launchpad.</p>
+          <ol class="snip-list notch" id="snippets"></ol>
+        </section>
+
+        <details class="noisy" id="noisyWrap" hidden>
+          <summary id="noisySummary"></summary>
+          <p class="section-note">The hits in these groups don't agree with each other (kicks under vocals or screeches, for example), so their averages come out muddy.</p>
+          <div id="noisyRows"></div>
+        </details>
       </section>
-      <details class="noisy" id="noisyWrap" hidden>
-        <summary id="noisySummary"></summary>
-        <p class="noisy-note">These groups' hits don't agree well with each other (e.g. kicks buried under vocals or screeches), so their averages are mushy.</p>
-        <div id="noisyRows"></div>
+
+      <details class="how">
+        <summary>How it works</summary>
+        <ol>
+          <li><b>Find the kicks.</b> Look for sudden jumps in the spectrum, work out the tempo, and keep only hits that sit on the beat grid. Hits with hardly any bass, like chord changes in a breakdown, are dropped.</li>
+          <li><b>Group them.</b> Hardstyle kicks are often re-pitched to follow the chords, and melodic sections have a softer kick under a sub bass. Hits are grouped by their spectrum, groups that end up sounding the same are merged, and the loudest consistent group (usually the drop kick) comes first.</li>
+          <li><b>Line them up and average.</b> Every hit in a group is shifted until it matches the others to the sample, then averaged. Anything that isn't locked to the kick (melody, vocals, screeches) cancels out.</li>
+          <li><b>Split.</b> In rawstyle each beat is kick, short gap, reverse bass. When that gap is there, the kick and the off-beat part are also saved separately.</li>
+          <li><b>Snippets.</b> The song is cut into sections from where kicks start and stop. The most typical two bars of each section become a loop; the first beats of the drop and the two bars before it become transitions.</li>
+        </ol>
+        <p><b>Limits.</b> You get the kick as it sounds in the finished master, not the producer's dry sample. Anything that hits with the kick every single time stays in. Releasing tracks with kicks taken from someone else's song needs their permission.</p>
       </details>
     </section>
 
-    <details class="how">
-      <summary>How it works</summary>
-      <ol>
-        <li><b>Find the kicks.</b> Look for sudden jumps in the spectrum, estimate the tempo, and keep only hits that sit on the beat grid. That skips off-beat sounds. Hits with hardly any bass (chord changes in the breakdown) are dropped.</li>
-        <li><b>Line them up.</b> Every hit is shifted by a few samples so it matches the median hit exactly (cross-correlation).</li>
-        <li><b>Group them.</b> Hardstyle kicks are often re-pitched to follow the chords, kicks on 2 &amp; 4 may have a clap on top, and melodic sections have a softer kick under a sub bass. Hits are clustered by their spectrum, groups that end up sounding the same are merged, and the loudest consistent group (usually the drop kick) comes first.</li>
-        <li><b>Average.</b> Taking the sample-by-sample median over all aligned hits cancels everything that isn't locked to the kick: melody, vocals, screeches.</li>
-        <li><b>Snippets.</b> Every beat is labelled (drop kick / other kick / no kick), bar lines go where those labels and the loudness change most, and the song is cut into sections. The most typical 2 bars of each section become a loop; the drop's first beats and the 2 bars before it become transition sounds.</li>
-        <li><b>Split.</b> In rawstyle each beat is "kick, short gap, off-beat sound (reverse bass)". If that gap is found, you get the kick and the off-beat part as separate files too.</li>
-      </ol>
-      <p><b>Limits:</b> you get the kick as it sounds in the finished master (after limiting and sidechain), not the producer's dry sample. Anything that hits exactly with the kick every time (a layered clap, a reverse bass right behind it) stays in. The "cleanest single hits" are untouched original hits, often from a kick-only intro, and sometimes sound better than the average.</p>
-      <p><b>Using the results:</b> great for learning and reference. Releasing tracks with kicks ripped from someone else's song needs permission.</p>
-    </details>
-    </section>
-
-    <section class="tab-panel" id="tab-launchpad" role="tabpanel" hidden>
-      <div class="lp-toolbar">
-        <span class="lp-hint" id="lpHint">Tap the pads (or use your keyboard).</span>
-        <span class="lp-buttons">
-          <button class="tool" id="lpStop" title="Stop everything (Space)">■ Stop all</button>
-          <button class="tool" id="lpEdit">Edit</button>
-          <button class="tool danger" id="lpClear">Clear all</button>
-        </span>
+    <!-- ============================== LAUNCHPAD ============================== -->
+    <section class="tab-panel" id="tab-launchpad" aria-label="Launchpad" hidden>
+      <div class="lp-head">
+        <h2>Launchpad</h2>
+        <p class="lp-hint" id="lpHint">Tap the pads, or play them with your keyboard.</p>
       </div>
-      <div class="lp-device">
+      <div class="lp-tools">
+        <button class="btn" id="lpStop" title="Space">Stop all</button>
+        <button class="btn" id="lpEdit" aria-pressed="false">Edit pads</button>
+        <button class="btn danger" id="lpClear">Clear pads</button>
+      </div>
+      <div class="lp-device notch">
         <div class="lp-top">
-          <span class="lp-brand">KICK<b>PAD</b></span>
+          <span class="lp-brand">KXP-16</span>
           <span class="lp-leds" aria-hidden="true"><i class="lp-led"></i><i class="lp-led"></i><i class="lp-led"></i><i class="lp-led"></i></span>
         </div>
         <div class="lp-grid" id="lpGrid"></div>
       </div>
-      <p class="lp-empty" id="lpEmpty">No sounds yet. In <b>Extraction</b>, hit <span class="lp-add demo"><span>+</span>LP</span> next to any kick or snippet to put it on a pad.</p>
-      <div class="lp-legend" id="lpLegend"></div>
-      <p class="lp-note">Loops start on the next beat of whatever is already looping, so they stay in time. Pads are saved in this browser.</p>
+      <p class="lp-empty" id="lpEmpty">The pads are empty. Load a track in Extract and press <span class="lp-add demo">+LP</span> next to a kick or a loop.</p>
+      <div class="lp-key" id="lpLegend"></div>
+      <p class="section-note centre">Loops start on the next beat of whatever is already looping, so they stay in time. Space stops everything.</p>
+    </section>
+
+    <!-- ============================== LIBRARY ============================== -->
+    <section class="tab-panel" id="tab-library" aria-label="Library" hidden>
+      <div class="lib-head">
+        <h2>Library</h2>
+        <span class="lib-count" id="libCount"></span>
+      </div>
+      <div class="lib-filter" id="libFilter" role="group" aria-label="Show"></div>
+      <ul class="lib-list" id="libList"></ul>
+      <p class="lib-empty" id="libEmpty">Nothing saved yet. Every sound you add with <span class="lp-add demo">+LP</span> is kept here, even after you take it off a pad. You can play it, download it, or move it to another pad.</p>
     </section>
   </main>
 
-  <dialog class="modal" id="lpModal" aria-labelledby="mTitle">
-    <div class="modal-card">
-      <header class="modal-head">
-        <h2 id="mTitle">Add to Launchpad</h2>
-        <button class="modal-x" id="mClose" aria-label="Close">×</button>
-      </header>
-      <div class="m-sound">
-        <button class="play small" id="mPlay" aria-label="Preview">▶</button>
-        <input id="mName" maxlength="24" aria-label="Pad name" autocomplete="off">
-        <span class="chip used" id="mCat"></span>
-      </div>
-      <div class="m-row">
-        <label class="switch"><input type="checkbox" id="mLoop"><span class="track"><span class="knob"></span></span> Loop <small>tap to start / stop</small></label>
-        <span class="m-len" id="mLen"></span>
-      </div>
-      <p class="m-pick">Pick a pad</p>
-      <div class="mini-grid" id="mGrid"></div>
+  <!-- ============================== BOTTOM BAR ============================== -->
+  <nav class="navbar" aria-label="Sections">
+    <button class="nav-btn" data-tab="extract" aria-current="page" aria-label="Extract" title="Extract">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+        <g class="off"><path d="M3 12h2M7 7v10M11 4v16M15 8v8M19 10v4" stroke-width="2" stroke-linecap="square"/></g>
+        <g class="on"><path d="M3 11h2v2H3zM6 6h2.5v12H6zM10 3h2.5v18H10zM14 7h2.5v10H14zM18 9h2.5v6H18z" stroke="none"/></g>
+      </svg>
+    </button>
+    <button class="nav-btn" data-tab="launchpad" aria-current="false" aria-label="Launchpad" title="Launchpad">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+        <g class="off"><path d="M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM13.5 13.5H20V20h-6.5z" stroke-width="1.8"/></g>
+        <g class="on"><path d="M3.5 3.5h7.5v7.5H3.5zM13 3.5h7.5v7.5H13zM3.5 13h7.5v7.5H3.5zM13 13h7.5v7.5H13z" stroke="none"/></g>
+      </svg>
+      <span class="nav-badge" id="lpCount" hidden>0</span>
+    </button>
+    <button class="nav-btn" data-tab="library" aria-current="false" aria-label="Library" title="Library">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+        <g class="off"><path d="M5 3h10l4 4v14H5zM8.5 17v3M11.5 17v3M14.5 17v3M8 7h5" stroke-width="1.8"/></g>
+        <g class="on"><path d="M4.5 2.5h11l4 4v15h-15zM8 16.5v3.5h1.6v-3.5zM11.2 16.5v3.5h1.6v-3.5zM14.4 16.5v3.5H16v-3.5z" stroke="none" fill-rule="evenodd"/></g>
+      </svg>
+    </button>
+  </nav>
+
+  <!-- ============================== PAD PICKER ============================== -->
+  <dialog class="picker notch" id="padPicker" aria-labelledby="ppTitle">
+    <div class="picker-head">
+      <h2 id="ppTitle">Add to the Launchpad</h2>
+      <button class="icon-btn" id="ppClose" aria-label="Close">
+        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 3l10 10M13 3 3 13" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
     </div>
+    <div class="picker-sound">
+      <button class="play small" id="ppPlay" aria-label="Preview">▶</button>
+      <input id="ppName" maxlength="24" aria-label="Name" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="picker-facts">
+      <span class="picker-cat"><i id="ppSwatch"></i><span id="ppCat"></span></span>
+      <span id="ppLen"></span>
+    </div>
+    <label class="switch" id="ppLoopRow"><input type="checkbox" id="ppLoop"><span class="track"><span class="knob"></span></span><span>Loop it <small>tap once to start, again to stop</small></span></label>
+    <p class="picker-ask">Which pad?</p>
+    <div class="slot-grid" id="ppGrid"></div>
+    <div class="picker-foot"><button class="btn" id="ppLibOnly">Save to library only</button></div>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <!-- ============================== TEMPLATES ============================== -->
   <template id="rowTpl">
-    <article class="row">
+    <article class="row notch">
       <header class="row-head">
-        <span class="tag"></span>
-        <span class="meta"></span>
+        <i class="swatch"></i>
+        <h3 class="tag"></h3>
+        <span class="meta facts"></span>
       </header>
       <div class="pair">
         <figure class="box ctx">
+          <figcaption>In the song</figcaption>
           <canvas></canvas>
           <button class="play" aria-label="Play this spot in the song">▶</button>
-          <figcaption>first appearance</figcaption>
         </figure>
-        <svg class="arrow" viewBox="0 0 60 30" aria-hidden="true"><path d="M4 15h48m-12-10 12 10-12 10" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg class="arrow" viewBox="0 0 40 16" aria-hidden="true"><path d="M2 8h32M28 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
         <figure class="box kick">
+          <figcaption>Extracted</figcaption>
           <canvas></canvas>
           <button class="play" aria-label="Play extracted kick">▶</button>
-          <figcaption>extracted</figcaption>
         </figure>
       </div>
       <ul class="parts"></ul>
@@ -161,18 +204,17 @@
   </template>
 
   <template id="snipTpl">
-    <article class="snip">
-      <header>
-        <span class="snip-cat"></span>
+    <li class="snip">
+      <div class="snip-text">
         <span class="snip-name"></span>
-      </header>
+        <span class="snip-facts"><span class="snip-cat"></span><span class="snip-meta facts"></span></span>
+      </div>
       <figure class="snip-wave">
         <canvas></canvas>
-        <button class="play" aria-label="Play snippet">▶</button>
+        <button class="play small" aria-label="Play snippet">▶</button>
       </figure>
-      <div class="snip-meta"></div>
       <div class="snip-actions"></div>
-    </article>
+    </li>
   </template>
 
   <script type="module" src="js/app.js"></script>

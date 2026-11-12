@@ -1,8 +1,12 @@
 import { mixToMono } from './dsp.js';
 import { preview, stopPreview, download } from './audio.js';
-import { initLaunchpad, openAddModal, CATEGORIES } from './launchpad.js';
+import { initLaunchpad, openPadPicker, CATEGORIES } from './launchpad.js';
+import { initLibrary } from './library.js';
+import { load as loadStore, subscribe, state } from './store.js';
+import { scene } from './scene.js';
 
-const COLORS = ['#ff4b5c', '#1cb0ff', '#1fd15f', '#ffb020', '#b18cff', '#2fd8c6', '#ff7ad9', '#c8d84a'];
+// kick groups in the Extract tab (A, B, C ...)
+const COLORS = ['#ff5a36', '#44a8ff', '#4fe08e', '#ffa21f', '#ff5c9d', '#3fd6c8', '#e6e36a', '#c9d2ea'];
 const LETTERS = 'ABCDEFGH';
 const $ = (s) => document.querySelector(s);
 
@@ -11,37 +15,34 @@ let result = null;
 let runId = 0;
 const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
-// ------------------------------------------------------------------ tabs
+// ------------------------------------------------------------------ tabs (bottom bar)
 
 function selectTab(name) {
-  document.querySelectorAll('.tab').forEach((t) => {
+  document.querySelectorAll('.nav-btn').forEach((t) => {
     const on = t.dataset.tab === name;
-    t.setAttribute('aria-selected', on);
-    t.tabIndex = on ? 0 : -1;
+    t.setAttribute('aria-current', on ? 'page' : 'false');
   });
   document.querySelectorAll('.tab-panel').forEach((p) => { p.hidden = p.id !== 'tab-' + name; });
-  moveInk();
-  if (name === 'extract') redraw();
+  document.body.dataset.tab = name;
   stopPreview();
+  if (name === 'extract') redraw();
+  window.scrollTo({ top: 0 });
 }
-function moveInk() {
-  const t = document.querySelector('.tab[aria-selected="true"]');
-  const ink = $('.tab-ink');
-  if (!t || !ink) return;
-  ink.style.width = t.offsetWidth + 'px';
-  ink.style.transform = `translateX(${t.offsetLeft}px)`;
-}
-document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => selectTab(t.dataset.tab)));
+document.querySelectorAll('.nav-btn').forEach((t) => t.addEventListener('click', () => selectTab(t.dataset.tab)));
+window.addEventListener('kx:tab', (e) => selectTab(e.detail));
 
-initLaunchpad({
-  onCount: (n) => {
-    const b = $('#lpCount');
-    const prev = +b.textContent;
-    b.textContent = n;
-    b.hidden = n === 0;
-    if (n > prev) { b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
-  },
-}).then(moveInk);
+scene.init();
+initLaunchpad();
+initLibrary();
+subscribe(() => {
+  const n = state.pads.filter(Boolean).length;
+  const b = $('#lpCount');
+  const prev = +b.textContent;
+  b.textContent = n;
+  b.hidden = n === 0;
+  if (n > prev) { b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
+});
+loadStore();
 
 // ------------------------------------------------------------------ worker
 
@@ -132,10 +133,10 @@ function actionButtons(sig, sr, filenameBase, lpSound) {
   }
   const lp = document.createElement('button');
   lp.className = 'lp-add';
-  lp.innerHTML = '<span>+</span>LP';
-  lp.title = 'Put this on a Launchpad pad';
+  lp.textContent = '+LP';
+  lp.title = 'Save to your library and put it on a Launchpad pad';
   lp.style.setProperty('--pc', CATEGORIES[lpSound.category].color);
-  lp.onclick = () => openAddModal({ sr, channels: Array.isArray(sig) ? sig : [sig], ...lpSound });
+  lp.onclick = () => openPadPicker({ sound: { sr, channels: Array.isArray(sig) ? sig : [sig], song: song.name, ...lpSound } });
   wrap.appendChild(lp);
   return wrap;
 }
@@ -201,11 +202,11 @@ function render() {
   const { x, sr } = song;
   $('#results').hidden = false;
 
-  const ignored = r.rejected.length ? ` · ${r.rejected.length} non-kick hits ignored` : '';
   const nGood = r.clusters.filter((c) => !c.noisy).length;
   $('#summary').innerHTML =
-    `<b>${escapeHtml(song.name)}</b><span>${r.bpm.toFixed(1)} BPM · ${r.totalKicks} kicks · ` +
-    `${nGood} kick type${nGood !== 1 ? 's' : ''}${ignored}</span>`;
+    `<b>${escapeHtml(song.name)}</b><span class="facts"><span>${r.bpm.toFixed(1)} BPM</span><span>${r.totalKicks} kicks</span>` +
+    `<span>${nGood} kick type${nGood !== 1 ? 's' : ''}</span>` +
+    (r.rejected.length ? `<span>${r.rejected.length} non-kick hits ignored</span>` : '') + `</span>`;
 
   // per-hit ownership (for colouring the overview): which group owns which sample range
   const spans = [];
@@ -247,8 +248,9 @@ function render() {
     const row = $('#rowTpl').content.firstElementChild.cloneNode(true);
     row.style.setProperty('--c', color);
     row.querySelector('.tag').textContent = 'Kick ' + L;
-    const pitch = c.tailHz ? ` · tail ≈ ${c.tailHz.toFixed(0)} Hz (${c.note})` : '';
-    row.querySelector('.meta').textContent = `${c.count} hit${c.count > 1 ? 's' : ''}${pitch} · first at ${fmtTime(c.times[0])}`;
+    row.querySelector('.meta').innerHTML = `<span>${c.count} hit${c.count > 1 ? 's' : ''}</span>` +
+      (c.tailHz ? `<span>tuned to ${c.note} (${c.tailHz.toFixed(0)} Hz)</span>` : '') +
+      `<span>first at ${fmtTime(c.times[0])}</span>`;
 
     // left box: the song around the first appearance (2 beats before -> 2 beats after the kick window)
     const beat = 60 / r.bpm;
@@ -305,7 +307,7 @@ function render() {
       const li = document.createElement('li');
       if (p.main) li.className = 'main';
       li.innerHTML = `<button class="play small" aria-label="Play">▶</button>` +
-        `<span class="label"><b>${p.label}</b><small>${p.hint ? p.hint + ' · ' : ''}${ms(p.sig)}</small></span>`;
+        `<span class="label"><b>${p.label}</b><small>${ms(p.sig)}</small>${p.hint ? `<small>${p.hint}</small>` : ''}</span>`;
       li.querySelector('.play').onclick = (e) => preview(p.sig, sr, e.currentTarget);
       li.appendChild(actionButtons(p.sig, sr, `${base}_${p.file}`, p.lp));
       pl.appendChild(li);
@@ -337,8 +339,9 @@ function render() {
     card.querySelector('.snip-name').textContent = s.label;
     card.querySelector('.snip-cat').textContent = cat.label;
     const bars = s.beats / 4;
-    card.querySelector('.snip-meta').textContent =
-      `${bars >= 1 ? bars + ' bar' + (bars > 1 ? 's' : '') : s.beats + ' beats'} · ${s.duration.toFixed(2)} s · at ${fmtTime(s.start)}${s.loop ? ' · loops' : ''}`;
+    card.querySelector('.snip-meta').innerHTML =
+      `<span>${bars >= 1 ? bars + ' bar' + (bars > 1 ? 's' : '') : s.beats + ' beats'}</span>` +
+      `<span>${s.duration.toFixed(2)} s</span><span>at ${fmtTime(s.start)}</span>`;
     const audio = sliceSong(s.start, s.duration);
     const cv = card.querySelector('canvas');
     const a = Math.round(s.start * sr), b = a + audio[0].length;
@@ -357,7 +360,6 @@ function render() {
 let redraw = () => {};
 let resizeTimer = 0;
 window.addEventListener('resize', () => {
-  moveInk();
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => redraw(), 120);
 });

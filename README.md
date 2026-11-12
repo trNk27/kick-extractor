@@ -30,13 +30,27 @@ steady 4/4 grid, and it's the loudest thing in the mix. So:
    2 bars of each section become a loop (drop, melodic part, break, second drop), and the drop's first
    2 beats and the 2 bars before it become transition sounds.
 
-## Launchpad tab
+## Tabs
 
-Every sound has a **+LP** button that puts it on a 4x4 pad grid (pick the pad in a small window).
+Bottom bar with three tabs: **Extract**, **Launchpad**, **Library**.
+
+## Launchpad and Library
+
+Every sound has a **+LP** button: it saves the sound to the Library and puts it on a 4x4 pad grid (pick
+the pad in a small window, or save it to the library only). The Library lists every saved sample,
+whether or not it is on a pad; from there you can play, download, move it to another pad, take it off
+its pad, or delete it.
 Pads are grey until assigned, then coloured by category (kick, off-beat, full beat, single hit, loop,
 break, transition). One-shots retrigger; loops toggle and start on the next beat of whatever is already
 looping. Keys 1–4 / Q–R / A–F / Z–V (physical positions, so QWERTZ works too), Space stops everything.
-Pads are stored in IndexedDB, so they survive a reload and can mix sounds from different songs.
+Library and pads are stored in IndexedDB, so they survive a reload and can mix sounds from different songs.
+
+## Design
+
+PS2 system-menu blue-black, with one low-res synthwave scene in the masthead (rendered at about a fifth
+of screen resolution with ordered dithering, scrolling one grid line per beat while loops play; pad
+hits flash it). Michroma + Chakra Petch (self-hosted, OFL), panels with one notched "memory card"
+corner, stepped (LED-like) animations, no gradients on UI, no purple.
 
 Tested on a synthetic track (`test/`) and on Sickmode & Rooler – *Too Cold* (160 BPM rawstyle).
 
@@ -56,7 +70,11 @@ index.html       UI
 css/style.css
 js/app.js        Extraction tab: decoding, drawing, results
 js/audio.js      playback + WAV/MP3 export
-js/launchpad.js  Launchpad tab, "+LP" window, pad engine, persistence
+js/launchpad.js  Launchpad tab, "+LP" pad picker, pad engine
+js/library.js    Library tab
+js/store.js      library + pad assignments (IndexedDB)
+js/scene.js      the masthead scene
+fonts/           Michroma, Chakra Petch (OFL)
 js/worker.js     runs the analysis in a Web Worker
 js/dsp.js        all signal processing (pure functions, also runs in Node)
 vendor/          lamejs MP3 encoder (loaded only when an MP3 is requested)
