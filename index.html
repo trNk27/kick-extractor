@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kick Extractor</title>
+  <meta name="description" content="Pull the kick out of a hardstyle track, right in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23ff4b5c'/%3E%3Cpath d='M6 17h5l2-7 3 13 2-9 2 3h6' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main>
+    <header class="top">
+      <h1>Kick<span>Extractor</span></h1>
+      <p class="sub">Drop a hardstyle track. Every kick gets lined up and averaged until only the kick is left. Runs entirely in your browser; the file never leaves your device.</p>
+    </header>
+
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a" hidden>
+      <span class="drop-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 16V4m0 0-5 5m5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="drop-text"><strong>Choose an MP3</strong> or drop it here</span>
+      <span class="drop-name" id="fileName"></span>
+    </label>
+
+    <section class="settings" aria-label="Settings">
+      <label>Kick types
+        <select id="optK">
+          <option value="">Auto</option>
+          <option>1</option><option>2</option><option>3</option>
+          <option>4</option><option>5</option><option>6</option>
+        </select>
+      </label>
+      <label>Length
+        <select id="optLen">
+          <option value="">Auto (≈ 1 beat)</option>
+          <option value="200">200 ms</option><option value="300">300 ms</option>
+          <option value="400">400 ms</option><option value="500">500 ms</option>
+          <option value="600">600 ms</option><option value="800">800 ms</option>
+        </select>
+      </label>
+    </section>
+
+    <div class="status" id="status" hidden>
+      <div class="status-label" id="statusLabel">Working…</div>
+      <div class="bar"><div class="bar-fill" id="statusBar"></div></div>
+    </div>
+    <div class="error" id="error" hidden></div>
+
+    <section id="results" hidden>
+      <div class="summary" id="summary"></div>
+      <figure class="overview">
+        <canvas id="overview"></canvas>
+        <button class="play" id="playSong" aria-label="Play song">▶</button>
+      </figure>
+      <div id="rows"></div>
+    </section>
+
+    <details class="how">
+      <summary>How it works</summary>
+      <ol>
+        <li><b>Find the kicks.</b> Look for sudden jumps in energy below 150 Hz, estimate the tempo, and keep only hits that sit on the beat grid. That skips off-beat reverse basses. Hits that aren't bass-heavy (chord changes in the breakdown) are dropped.</li>
+        <li><b>Line them up.</b> Every hit is shifted by a few samples so it matches the median hit exactly (cross-correlation).</li>
+        <li><b>Group them.</b> Hardstyle kicks are often re-pitched to follow the chords, and kicks on 2 &amp; 4 may have a clap on top. Hits are clustered by their spectrum so each variant gets its own result.</li>
+        <li><b>Average.</b> Taking the sample-by-sample median over all aligned hits cancels everything that isn't locked to the kick: melody, vocals, screeches.</li>
+      </ol>
+      <p><b>Limits:</b> you get the kick as it sounds in the finished master (after limiting and sidechain), not the producer's dry sample. Anything that hits exactly with the kick every time (a layered clap, a reverse bass right behind it) stays in. The "cleanest single hits" are untouched original hits, often from a kick-only intro, and sometimes sound better than the average.</p>
+      <p><b>Using the results:</b> great for learning and reference. Releasing tracks with kicks ripped from someone else's song needs permission.</p>
+    </details>
+  </main>
+
+  <template id="rowTpl">
+    <article class="row">
+      <header class="row-head">
+        <span class="tag"></span>
+        <span class="meta"></span>
+      </header>
+      <div class="pair">
+        <figure class="box ctx">
+          <canvas></canvas>
+          <button class="play" aria-label="Play this spot in the song">▶</button>
+          <figcaption>first appearance</figcaption>
+        </figure>
+        <svg class="arrow" viewBox="0 0 60 30" aria-hidden="true"><path d="M4 15h48m-12-10 12 10-12 10" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <figure class="box kick">
+          <canvas></canvas>
+          <button class="play" aria-label="Play extracted kick">▶</button>
+          <figcaption>extracted</figcaption>
+        </figure>
+      </div>
+      <div class="actions">
+        <button class="dl dl-median">⬇ WAV <small>median</small></button>
+        <button class="dl dl-mean">⬇ WAV <small>mean</small></button>
+      </div>
+      <details class="singles">
+        <summary>Cleanest single hits</summary>
+        <ul></ul>
+      </details>
+    </article>
+  </template>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
