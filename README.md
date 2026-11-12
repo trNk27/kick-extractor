@@ -25,6 +25,19 @@ steady 4/4 grid, and it's the loudest thing in the mix. So:
    and the off-beat part are also exported separately. The page also ranks the individual hits
    closest to the average ("cleanest single hits").
 
+6. **Song snippets**: every beat is labelled (drop kick / other kick / no kick); the downbeat is the
+   beat phase where labels and loudness change most; bars are grouped into sections. The most typical
+   2 bars of each section become a loop (drop, melodic part, break, second drop), and the drop's first
+   2 beats and the 2 bars before it become transition sounds.
+
+## Launchpad tab
+
+Every sound has a **+LP** button that puts it on a 4x4 pad grid (pick the pad in a small window).
+Pads are grey until assigned, then coloured by category (kick, off-beat, full beat, single hit, loop,
+break, transition). One-shots retrigger; loops toggle and start on the next beat of whatever is already
+looping. Keys 1–4 / Q–R / A–F / Z–V (physical positions, so QWERTZ works too), Space stops everything.
+Pads are stored in IndexedDB, so they survive a reload and can mix sounds from different songs.
+
 Tested on a synthetic track (`test/`) and on Sickmode & Rooler – *Too Cold* (160 BPM rawstyle).
 
 **Limits:** you get the kick as it sounds in the finished master, not the dry sample, and anything
@@ -41,7 +54,9 @@ silence at the start (encoder delay), so WAV is the better choice for putting ki
 ```
 index.html       UI
 css/style.css
-js/app.js        UI logic: decoding, drawing, playback, WAV download
+js/app.js        Extraction tab: decoding, drawing, results
+js/audio.js      playback + WAV/MP3 export
+js/launchpad.js  Launchpad tab, "+LP" window, pad engine, persistence
 js/worker.js     runs the analysis in a Web Worker
 js/dsp.js        all signal processing (pure functions, also runs in Node)
 vendor/          lamejs MP3 encoder (loaded only when an MP3 is requested)

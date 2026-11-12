@@ -15,6 +15,13 @@
       <p class="sub">Drop a hardstyle track. Every kick gets lined up and averaged until only the kick is left. Runs entirely in your browser; the file never leaves your device.</p>
     </header>
 
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab" role="tab" data-tab="extract" aria-selected="true">Extraction</button>
+      <button class="tab" role="tab" data-tab="launchpad" aria-selected="false" tabindex="-1">Launchpad <span class="badge" id="lpCount" hidden>0</span></button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
+
+    <section class="tab-panel" id="tab-extract" role="tabpanel">
     <label class="drop" id="drop">
       <input type="file" id="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a" hidden>
       <span class="drop-icon" aria-hidden="true">
@@ -56,6 +63,10 @@
         <button class="play" id="playSong" aria-label="Play song">▶</button>
       </figure>
       <div id="rows"></div>
+      <section class="snippets" id="snippetSection" hidden>
+        <h2>Song snippets <small>bar-aligned, ready for the Launchpad</small></h2>
+        <div class="snip-grid" id="snippets"></div>
+      </section>
       <details class="noisy" id="noisyWrap" hidden>
         <summary id="noisySummary"></summary>
         <p class="noisy-note">These groups' hits don't agree well with each other (e.g. kicks buried under vocals or screeches), so their averages are mushy.</p>
@@ -70,12 +81,57 @@
         <li><b>Line them up.</b> Every hit is shifted by a few samples so it matches the median hit exactly (cross-correlation).</li>
         <li><b>Group them.</b> Hardstyle kicks are often re-pitched to follow the chords, kicks on 2 &amp; 4 may have a clap on top, and melodic sections have a softer kick under a sub bass. Hits are clustered by their spectrum, groups that end up sounding the same are merged, and the loudest consistent group (usually the drop kick) comes first.</li>
         <li><b>Average.</b> Taking the sample-by-sample median over all aligned hits cancels everything that isn't locked to the kick: melody, vocals, screeches.</li>
+        <li><b>Snippets.</b> Every beat is labelled (drop kick / other kick / no kick), bar lines go where those labels and the loudness change most, and the song is cut into sections. The most typical 2 bars of each section become a loop; the drop's first beats and the 2 bars before it become transition sounds.</li>
         <li><b>Split.</b> In rawstyle each beat is "kick, short gap, off-beat sound (reverse bass)". If that gap is found, you get the kick and the off-beat part as separate files too.</li>
       </ol>
       <p><b>Limits:</b> you get the kick as it sounds in the finished master (after limiting and sidechain), not the producer's dry sample. Anything that hits exactly with the kick every time (a layered clap, a reverse bass right behind it) stays in. The "cleanest single hits" are untouched original hits, often from a kick-only intro, and sometimes sound better than the average.</p>
       <p><b>Using the results:</b> great for learning and reference. Releasing tracks with kicks ripped from someone else's song needs permission.</p>
     </details>
+    </section>
+
+    <section class="tab-panel" id="tab-launchpad" role="tabpanel" hidden>
+      <div class="lp-toolbar">
+        <span class="lp-hint" id="lpHint">Tap the pads (or use your keyboard).</span>
+        <span class="lp-buttons">
+          <button class="tool" id="lpStop" title="Stop everything (Space)">■ Stop all</button>
+          <button class="tool" id="lpEdit">Edit</button>
+          <button class="tool danger" id="lpClear">Clear all</button>
+        </span>
+      </div>
+      <div class="lp-device">
+        <div class="lp-top">
+          <span class="lp-brand">KICK<b>PAD</b></span>
+          <span class="lp-leds" aria-hidden="true"><i class="lp-led"></i><i class="lp-led"></i><i class="lp-led"></i><i class="lp-led"></i></span>
+        </div>
+        <div class="lp-grid" id="lpGrid"></div>
+      </div>
+      <p class="lp-empty" id="lpEmpty">No sounds yet. In <b>Extraction</b>, hit <span class="lp-add demo"><span>+</span>LP</span> next to any kick or snippet to put it on a pad.</p>
+      <div class="lp-legend" id="lpLegend"></div>
+      <p class="lp-note">Loops start on the next beat of whatever is already looping, so they stay in time. Pads are saved in this browser.</p>
+    </section>
   </main>
+
+  <dialog class="modal" id="lpModal" aria-labelledby="mTitle">
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="mTitle">Add to Launchpad</h2>
+        <button class="modal-x" id="mClose" aria-label="Close">×</button>
+      </header>
+      <div class="m-sound">
+        <button class="play small" id="mPlay" aria-label="Preview">▶</button>
+        <input id="mName" maxlength="24" aria-label="Pad name" autocomplete="off">
+        <span class="chip used" id="mCat"></span>
+      </div>
+      <div class="m-row">
+        <label class="switch"><input type="checkbox" id="mLoop"><span class="track"><span class="knob"></span></span> Loop <small>tap to start / stop</small></label>
+        <span class="m-len" id="mLen"></span>
+      </div>
+      <p class="m-pick">Pick a pad</p>
+      <div class="mini-grid" id="mGrid"></div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <template id="rowTpl">
     <article class="row">
@@ -101,6 +157,21 @@
         <summary>Cleanest single hits</summary>
         <ul></ul>
       </details>
+    </article>
+  </template>
+
+  <template id="snipTpl">
+    <article class="snip">
+      <header>
+        <span class="snip-cat"></span>
+        <span class="snip-name"></span>
+      </header>
+      <figure class="snip-wave">
+        <canvas></canvas>
+        <button class="play" aria-label="Play snippet">▶</button>
+      </figure>
+      <div class="snip-meta"></div>
+      <div class="snip-actions"></div>
     </article>
   </template>
 

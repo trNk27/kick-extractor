@@ -232,6 +232,7 @@ export function detectKicks(x, sr) {
   return {
     bpm: 60 * sr / bestP,
     periodSamples: bestP,
+    t0, // a beat position in samples (any beat; the grid is t0 + n * periodSamples)
     times: kicks.map(k => k.t),
     beats: kicks.map(k => k.beat),
   };
@@ -654,8 +655,12 @@ export function analyze(x, sr, opts = {}, onProgress = () => {}) {
   summaries.sort((p, q) => (p.noisy - q.noisy) || (q.quality - p.quality));
   const clusters = summaries.map(({ medianRaw, rawTimes, rms, ...rest }) => rest);
 
+  onProgress('Finding song snippets', 0.95);
+  let snippets = [];
+  try { snippets = findSnippets(x, sr, det, clusters); } catch (e) { /* snippets are a bonus */ }
+
   return {
-    bpm: det.bpm, sampleRate: sr, k: clusters.length, totalKicks: times.length, rejected, clusters,
+    bpm: det.bpm, sampleRate: sr, k: clusters.length, totalKicks: times.length, rejected, clusters, snippets,
     windowPre: pre / sr, windowLen: len / sr, // each hit's window is [time - windowPre, time - windowPre + windowLen]
   };
 }
@@ -681,4 +686,153 @@ export function encodeWav(sig, sr) {
     o += 3;
   }
   return buf;
+}
+
+// ---------------------------------------------------------------- song snippets for the launchpad
+//
+// Bar-aligned pieces of the song: a drop loop, the moment the drop hits, the bars leading into it,
+// a break and a melodic loop. Steps:
+//   1. every beat on the grid gets a state: main (drop) kick / other kick / no kick
+//   2. downbeat = the beat phase (0..3) where state and loudness change most often -> bar lines
+//      (sections in dance music start on bar lines, so changes pile up there)
+//   3. bars -> sections (runs of bars with the same state), tiny runs merged into their neighbour
+//   4. per section, the most "typical" bars (closest spectrum to the rest of the section) become a loop
+
+function bandProfile(x, start, sr) {
+  const N = 4096;
+  const re = new Float64Array(N), im = new Float64Array(N);
+  for (let i = 0; i < N && start + i < x.length; i++) re[i] = x[start + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
+  fft(re, im);
+  const edges = bandEdges(40, 12000, 14), binHz = sr / N, out = [];
+  for (let b = 0; b < edges.length - 1; b++) {
+    let e = 0;
+    for (let k = Math.max(1, Math.floor(edges[b] / binHz)); k < Math.ceil(edges[b + 1] / binHz); k++) e += re[k] * re[k] + im[k] * im[k];
+    out.push(10 * Math.log10(e + 1e-12));
+  }
+  return out;
+}
+
+export function findSnippets(x, sr, det, clusters) {
+  const P = det.periodSamples;
+  let t0 = det.t0 % P;
+  if (t0 < 0) t0 += P;
+  const nBeats = Math.floor((x.length - t0) / P) - 1;
+  if (nBeats < 32) return [];
+
+  // 1. per-beat state + exact kick onsets where we have them
+  const state = new Int8Array(nBeats); // 0 none, 1 other kick, 2 main kick
+  const kickAt = new Float64Array(nBeats).fill(NaN);
+  clusters.forEach((c, ci) => {
+    const st = ci === 0 && !c.noisy ? 2 : 1;
+    for (const ts of c.times) {
+      const smp = ts * sr, b = Math.round((smp - t0) / P);
+      if (b < 0 || b >= nBeats || Math.abs(smp - (t0 + b * P)) > 0.15 * P) continue;
+      if (st >= state[b]) { state[b] = st; kickAt[b] = smp; }
+    }
+  });
+  const beatTime = (b) => t0 + b * P;
+  const lr = new Float64Array(nBeats);
+  for (let b = 0; b < nBeats; b++) {
+    const s = Math.round(beatTime(b));
+    let e = 0, n = 0;
+    for (let i = 0; i < P; i += 4) { const v = x[s + i] || 0; e += v * v; n++; }
+    lr[b] = Math.log(Math.sqrt(e / n) + 1e-4);
+  }
+
+  // 2. downbeat phase
+  let ph = 0, best = -1;
+  for (let p = 0; p < 4; p++) {
+    let sc = 0;
+    for (let b = p || 4; b < nBeats; b += 4) sc += (state[b] !== state[b - 1] ? 1 : 0) + Math.abs(lr[b] - lr[b - 1]);
+    if (sc > best) { best = sc; ph = p; }
+  }
+
+  // 3. bars and sections
+  const nBars = Math.floor((nBeats - ph) / 4);
+  const barBeat = (i) => ph + 4 * i;
+  const barLabel = [], barLoud = [];
+  for (let i = 0; i < nBars; i++) {
+    let main = 0, any = 0, l = 0;
+    for (let j = 0; j < 4; j++) { const st = state[barBeat(i) + j]; if (st === 2) main++; if (st) any++; l += lr[barBeat(i) + j] / 4; }
+    barLoud.push(l);
+    barLabel.push(main >= 2 ? 'drop' : any >= 2 ? 'kick' : 'none');
+  }
+  const maxLoud = Math.max(...barLoud);
+  for (let i = 0; i < nBars; i++) if (barLoud[i] < maxLoud - Math.log(12)) barLabel[i] = 'silent';
+
+  let runs = [];
+  for (let i = 0; i < nBars; i++) {
+    const r = runs[runs.length - 1];
+    if (r && r.label === barLabel[i]) r.end = i + 1;
+    else runs.push({ label: barLabel[i], start: i, end: i + 1 });
+  }
+  // merge 1-bar blips into the previous section
+  const merged = [];
+  for (const r of runs) {
+    const prev = merged[merged.length - 1];
+    if (prev && (r.end - r.start < 2 || prev.label === r.label)) prev.end = r.end;
+    else merged.push({ ...r });
+  }
+  runs = merged;
+
+  // spectral profile per bar (for picking typical bars)
+  const prof = [];
+  for (let i = 0; i < nBars; i++) {
+    const bands = [0, 1, 2, 3].map(j => bandProfile(x, Math.round(beatTime(barBeat(i) + j)), sr));
+    prof.push(bands[0].map((_, k) => (bands[0][k] + bands[1][k] + bands[2][k] + bands[3][k]) / 4));
+  }
+  // most typical start bar for an `len`-bar loop inside run r (skipping its first bar: often a crash)
+  const typicalBar = (r, len) => {
+    const lo = r.start + (r.end - r.start > len + 1 ? 1 : 0), hi = r.end - len;
+    if (hi < lo) return null;
+    let bi = lo, bd = Infinity;
+    for (let i = lo; i <= hi; i++) {
+      let d = 0;
+      for (let j = r.start; j < r.end; j++) d += Math.sqrt(dist2(prof[i], prof[j]));
+      if (d < bd) { bd = d; bi = i; }
+    }
+    return bi;
+  };
+
+  const pre = Math.round(0.005 * sr);
+  // start time of a beat: the real kick onset if one is there, else the grid
+  const startOf = (b) => {
+    const g = Math.round(beatTime(b));
+    if (Number.isNaN(kickAt[b])) return g;
+    const a = Math.max(0, Math.round(kickAt[b]) - Math.round(0.03 * sr));
+    return a + findOnset(x.subarray(a, a + Math.round(0.08 * sr)), sr, Math.round(0.03 * sr));
+  };
+  const out = [];
+  const add = (label, category, beat, beats, loop) => {
+    if (beat < 0 || beat + beats > nBeats) return;
+    const start = Math.max(0, startOf(beat) - pre);
+    out.push({ label, category, start: start / sr, duration: beats * P / sr, beats, loop, bpm: det.bpm });
+  };
+
+  const drops = runs.filter(r => r.label === 'drop' && r.end - r.start >= 4);
+  const longest = (label) => runs.filter(r => r.label === label && r.end - r.start >= 4)
+    .sort((a, b) => (b.end - b.start) - (a.end - a.start))[0];
+
+  if (drops[0]) {
+    const d = drops[0];
+    const tb = typicalBar(d, 2);
+    if (tb != null) add('Drop loop', 'loop', barBeat(tb), 8, true);
+    add('Drop impact', 'fx', barBeat(d.start), 2, false);
+    if (d.start >= 2) add('Pre-drop', 'fx', barBeat(d.start - 2), 8, false);
+  }
+  const mel = longest('kick');
+  if (mel) { const tb = typicalBar(mel, 2); if (tb != null) add('Melodic loop', 'loop', barBeat(tb), 8, true); }
+  const brk = longest('none');
+  if (brk) {
+    // keep clear of the bars leading into a drop (that's the pre-drop snippet)
+    const next = runs[runs.indexOf(brk) + 1];
+    const r = next && next.label === 'drop' && brk.end - brk.start >= 4 ? { ...brk, end: brk.end - 2 } : brk;
+    const tb = typicalBar(r, 2);
+    if (tb != null) add('Break', 'break', barBeat(tb), 8, true);
+  }
+  if (drops[1]) {
+    const tb = typicalBar(drops[1], 2);
+    if (tb != null) add('Drop 2 loop', 'loop', barBeat(tb), 8, true);
+  }
+  return out;
 }

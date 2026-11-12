@@ -1,13 +1,47 @@
-import { mixToMono, encodeWav } from './dsp.js';
+import { mixToMono } from './dsp.js';
+import { preview, stopPreview, download } from './audio.js';
+import { initLaunchpad, openAddModal, CATEGORIES } from './launchpad.js';
 
 const COLORS = ['#ff4b5c', '#1cb0ff', '#1fd15f', '#ffb020', '#b18cff', '#2fd8c6', '#ff7ad9', '#c8d84a'];
 const LETTERS = 'ABCDEFGH';
 const $ = (s) => document.querySelector(s);
 
-let song = null;     // { x: Float32Array, sr, name }
+let song = null;     // { x: mono Float32Array, channels: Float32Array[], sr, name }
 let result = null;
 let runId = 0;
 const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+
+// ------------------------------------------------------------------ tabs
+
+function selectTab(name) {
+  document.querySelectorAll('.tab').forEach((t) => {
+    const on = t.dataset.tab === name;
+    t.setAttribute('aria-selected', on);
+    t.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll('.tab-panel').forEach((p) => { p.hidden = p.id !== 'tab-' + name; });
+  moveInk();
+  if (name === 'extract') redraw();
+  stopPreview();
+}
+function moveInk() {
+  const t = document.querySelector('.tab[aria-selected="true"]');
+  const ink = $('.tab-ink');
+  if (!t || !ink) return;
+  ink.style.width = t.offsetWidth + 'px';
+  ink.style.transform = `translateX(${t.offsetLeft}px)`;
+}
+document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => selectTab(t.dataset.tab)));
+
+initLaunchpad({
+  onCount: (n) => {
+    const b = $('#lpCount');
+    const prev = +b.textContent;
+    b.textContent = n;
+    b.hidden = n === 0;
+    if (n > prev) { b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
+  },
+}).then(moveInk);
 
 // ------------------------------------------------------------------ worker
 
@@ -33,7 +67,7 @@ function run() {
 
 async function loadFile(file) {
   if (!file) return;
-  stopPlayback();
+  stopPreview();
   $('#fileName').textContent = file.name;
   $('#results').hidden = true;
   showError(null);
@@ -42,10 +76,10 @@ async function loadFile(file) {
     const buf = await file.arrayBuffer();
     const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     const ab = await new Ctx(1, 1, 44100).decodeAudioData(buf);
-    const chans = [];
-    for (let c = 0; c < ab.numberOfChannels; c++) chans.push(ab.getChannelData(c));
-    const x = mixToMono(chans);
-    song = { x, sr: ab.sampleRate, name: file.name.replace(/\.[^.]+$/, '') };
+    const channels = [];
+    for (let c = 0; c < Math.min(2, ab.numberOfChannels); c++) channels.push(ab.getChannelData(c).slice());
+    const x = mixToMono(channels);
+    song = { x, channels, sr: ab.sampleRate, name: file.name.replace(/\.[^.]+$/, '') };
     const copy = x.slice();
     worker.postMessage({ type: 'load', x: copy, sr: ab.sampleRate }, [copy.buffer]);
     run();
@@ -80,89 +114,12 @@ function showError(msg) {
   el.textContent = msg || '';
 }
 
-// ------------------------------------------------------------------ audio playback
+// ------------------------------------------------------------------ buttons next to each sound
 
-let actx = null, current = null;
+const safe = (s) => s.replace(/[^\w\-]+/g, '_').replace(/_+/g, '_').slice(0, 60);
 
-function stopPlayback() {
-  if (!current) return;
-  try { current.src.stop(); } catch { /* already stopped */ }
-  current.btn?.classList.remove('playing');
-  if (current.btn) current.btn.textContent = '▶';
-  current = null;
-}
-
-function play(sig, sr, btn) {
-  const same = current && current.btn === btn;
-  stopPlayback();
-  if (same) return; // second tap = stop
-  actx ??= new (window.AudioContext || window.webkitAudioContext)();
-  actx.resume();
-  const b = actx.createBuffer(1, sig.length, sr);
-  b.copyToChannel(sig, 0);
-  const src = actx.createBufferSource();
-  src.buffer = b;
-  src.connect(actx.destination);
-  src.start();
-  current = { src, btn };
-  btn.classList.add('playing');
-  btn.textContent = '■';
-  src.onended = () => { if (current?.src === src) stopPlayback(); };
-}
-
-// ------------------------------------------------------------------ downloads
-
-// Lazily load the MP3 encoder (lamejs, a JS port of LAME) the first time someone wants an MP3.
-let lameLoading = null;
-function loadLame() {
-  if (window.lamejs) return Promise.resolve(window.lamejs);
-  lameLoading ??= new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = new URL('../vendor/lame.min.js', import.meta.url).href;
-    s.onload = () => resolve(window.lamejs);
-    s.onerror = () => { lameLoading = null; reject(new Error('Could not load the MP3 encoder.')); };
-    document.head.appendChild(s);
-  });
-  return lameLoading;
-}
-
-async function encodeMp3(sig, sr) {
-  const lame = await loadLame();
-  const enc = new lame.Mp3Encoder(1, sr, 320);
-  const pcm = new Int16Array(sig.length);
-  for (let i = 0; i < sig.length; i++) {
-    const v = Math.max(-1, Math.min(1, sig[i]));
-    pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
-  }
-  const chunks = [];
-  for (let i = 0; i < pcm.length; i += 1152) {
-    const b = enc.encodeBuffer(pcm.subarray(i, i + 1152));
-    if (b.length) chunks.push(b);
-  }
-  const end = enc.flush();
-  if (end.length) chunks.push(end);
-  return new Blob(chunks, { type: 'audio/mpeg' });
-}
-
-async function download(sig, sr, filenameBase, format) {
-  try {
-    const blob = format === 'mp3'
-      ? await encodeMp3(sig, sr)
-      : new Blob([encodeWav(sig, sr)], { type: 'audio/wav' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${filenameBase}.${format}`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  } catch (err) {
-    showError(err.message || String(err));
-  }
-}
-
-// "⬇ WAV  ⬇ MP3" button pair
-function dlButtons(sig, sr, filenameBase) {
+// ⬇ WAV  ⬇ MP3  +LP
+function actionButtons(sig, sr, filenameBase, lpSound) {
   const wrap = document.createElement('span');
   wrap.className = 'dls';
   for (const fmt of ['wav', 'mp3']) {
@@ -170,13 +127,18 @@ function dlButtons(sig, sr, filenameBase) {
     b.className = 'dl small dl-' + fmt;
     b.textContent = '⬇ ' + fmt.toUpperCase();
     if (fmt === 'mp3') b.title = 'MP3 adds ~25 ms of silence at the start (encoder delay). Use WAV for producing.';
-    b.onclick = () => download(sig, sr, filenameBase, fmt);
+    b.onclick = () => download(sig, sr, filenameBase, fmt).catch((err) => showError(err.message || String(err)));
     wrap.appendChild(b);
   }
+  const lp = document.createElement('button');
+  lp.className = 'lp-add';
+  lp.innerHTML = '<span>+</span>LP';
+  lp.title = 'Put this on a Launchpad pad';
+  lp.style.setProperty('--pc', CATEGORIES[lpSound.category].color);
+  lp.onclick = () => openAddModal({ sr, channels: Array.isArray(sig) ? sig : [sig], ...lpSound });
+  wrap.appendChild(lp);
   return wrap;
 }
-
-const safe = (s) => s.replace(/[^\w\-]+/g, '_').replace(/_+/g, '_').slice(0, 60);
 
 // ------------------------------------------------------------------ drawing
 
@@ -191,14 +153,14 @@ function sizeCanvas(cv) {
 }
 
 // Min/max waveform of sig[from..to). colorAt(sampleIndex) picks the colour per column.
-function drawWave(cv, sig, from, to, colorAt, { gain = null } = {}) {
+function drawWave(cv, sig, from, to, colorAt) {
   const { g, w, h } = sizeCanvas(cv);
   g.clearRect(0, 0, w, h);
   from = Math.max(0, Math.floor(from)); to = Math.min(sig.length, Math.ceil(to));
   const n = to - from;
-  if (n <= 0) return { g, w, h };
-  let peak = gain;
-  if (peak == null) { peak = 1e-6; for (let i = from; i < to; i++) peak = Math.max(peak, Math.abs(sig[i])); }
+  if (n <= 0 || w < 2) return { g, w, h };
+  let peak = 1e-6;
+  for (let i = from; i < to; i++) peak = Math.max(peak, Math.abs(sig[i]));
   const mid = h / 2, amp = (h / 2 - 4) / peak;
   g.lineWidth = 1;
   for (let px = 0; px < w; px++) {
@@ -218,6 +180,19 @@ const fmtTime = (t) => {
   const m = Math.floor(t / 60), s = t - m * 60;
   return `${m}:${s.toFixed(2).padStart(5, '0')}`;
 };
+
+// stereo slice of the song with 2 ms fades (for snippets)
+function sliceSong(startSec, durSec) {
+  const { channels, sr } = song;
+  const a = Math.max(0, Math.round(startSec * sr));
+  const n = Math.min(channels[0].length - a, Math.round(durSec * sr));
+  const f = Math.round(0.002 * sr);
+  return channels.map((ch) => {
+    const out = ch.slice(a, a + n);
+    for (let i = 0; i < f && i < n; i++) { out[i] *= i / f; out[n - 1 - i] *= i / f; }
+    return out;
+  });
+}
 
 // ------------------------------------------------------------------ results
 
@@ -247,11 +222,15 @@ function render() {
       while (si < spans.length && spans[si][1] < i) si++;
       return si < spans.length && spans[si][0] <= i ? COLORS[spans[si][2] % COLORS.length] + 'cc' : '#5b5b68';
     });
-    // kick ticks along the bottom
-    r.clusters.forEach((c, ci) => {
+    r.clusters.forEach((c, ci) => { // kick ticks along the bottom
       g.fillStyle = COLORS[ci % COLORS.length];
       for (const t of c.times) g.fillRect(Math.round(t * sr / x.length * w), h - 4, 1.5, 4);
     });
+    for (const s of r.snippets) { // snippet ranges along the top
+      g.fillStyle = CATEGORIES[s.category].color;
+      const xa = s.start * sr / x.length * w, xb = (s.start + s.duration) * sr / x.length * w;
+      g.fillRect(xa, 0, Math.max(2, xb - xa), 4);
+    }
   };
 
   const rows = $('#rows'), noisyRows = $('#noisyRows');
@@ -264,10 +243,10 @@ function render() {
 
   r.clusters.forEach((c, ci) => {
     const color = COLORS[ci % COLORS.length];
-    const label = 'Kick ' + LETTERS[ci];
+    const L = LETTERS[ci];
     const row = $('#rowTpl').content.firstElementChild.cloneNode(true);
     row.style.setProperty('--c', color);
-    row.querySelector('.tag').textContent = label;
+    row.querySelector('.tag').textContent = 'Kick ' + L;
     const pitch = c.tailHz ? ` · tail ≈ ${c.tailHz.toFixed(0)} Hz (${c.note})` : '';
     row.querySelector('.meta').textContent = `${c.count} hit${c.count > 1 ? 's' : ''}${pitch} · first at ${fmtTime(c.times[0])}`;
 
@@ -287,7 +266,7 @@ function render() {
       g.lineWidth = 1.5;
       g.strokeRect(xa + 0.75, 0.75, xb - xa - 1.5, h - 1.5);
     });
-    row.querySelector('.ctx .play').onclick = (e) => play(x.subarray(cA, cB), sr, e.currentTarget);
+    row.querySelector('.ctx .play').onclick = (e) => preview(x.subarray(cA, cB), sr, e.currentTarget);
 
     // right box: the extracted kick
     const kickCv = row.querySelector('.kick canvas');
@@ -298,7 +277,6 @@ function render() {
         g.save();
         g.setLineDash([4, 4]);
         g.strokeStyle = '#ffffffcc';
-        g.lineWidth = 1;
         g.beginPath(); g.moveTo(xs, 0); g.lineTo(xs, h); g.stroke();
         g.restore();
         g.fillStyle = '#ffffffb0';
@@ -307,20 +285,20 @@ function render() {
         g.fillText('off-beat', xs + 4, h - 4);
       }
     });
-    row.querySelector('.kick .play').onclick = (e) => play(c.median, sr, e.currentTarget);
+    row.querySelector('.kick .play').onclick = (e) => preview(c.median, sr, e.currentTarget);
 
-    const base = `${safe(song.name)}_kick-${LETTERS[ci]}${c.note ? '_' + c.note.replace('#', 's') : ''}`;
+    const base = `${safe(song.name)}_kick-${L}${c.note ? '_' + c.note.replace('#', 's') : ''}`;
     const ms = (sig) => `${Math.round(sig.length / sr * 1000)} ms`;
     const parts = c.parts
       ? [
-        { label: 'Kick only', sig: c.parts.kick, file: 'kick', main: true },
-        { label: 'Off-beat part', hint: 'reverse bass etc.', sig: c.parts.offbeat, file: 'offbeat' },
-        { label: 'Full beat', sig: c.median, file: 'fullbeat' },
-        { label: 'Full beat, mean', hint: 'smoother, outliers leak in', sig: c.mean, file: 'fullbeat_mean' },
+        { label: 'Kick only', sig: c.parts.kick, file: 'kick', main: true, lp: { name: `Kick ${L}`, category: 'kick' } },
+        { label: 'Off-beat part', hint: 'reverse bass etc.', sig: c.parts.offbeat, file: 'offbeat', lp: { name: `Off-beat ${L}`, category: 'offbeat' } },
+        { label: 'Full beat', sig: c.median, file: 'fullbeat', lp: { name: `Beat ${L}`, category: 'beat' } },
+        { label: 'Full beat, mean', hint: 'smoother, outliers leak in', sig: c.mean, file: 'fullbeat_mean', lp: { name: `Beat ${L} (mean)`, category: 'beat' } },
       ]
       : [
-        { label: 'Kick', sig: c.median, file: 'median', main: true },
-        { label: 'Kick, mean', hint: 'smoother, outliers leak in', sig: c.mean, file: 'mean' },
+        { label: 'Kick', sig: c.median, file: 'median', main: true, lp: { name: `Kick ${L}`, category: 'kick' } },
+        { label: 'Kick, mean', hint: 'smoother, outliers leak in', sig: c.mean, file: 'mean', lp: { name: `Kick ${L} (mean)`, category: 'kick' } },
       ];
     const pl = row.querySelector('.parts');
     for (const p of parts) {
@@ -328,8 +306,8 @@ function render() {
       if (p.main) li.className = 'main';
       li.innerHTML = `<button class="play small" aria-label="Play">▶</button>` +
         `<span class="label"><b>${p.label}</b><small>${p.hint ? p.hint + ' · ' : ''}${ms(p.sig)}</small></span>`;
-      li.querySelector('.play').onclick = (e) => play(p.sig, sr, e.currentTarget);
-      li.appendChild(dlButtons(p.sig, sr, `${base}_${p.file}`));
+      li.querySelector('.play').onclick = (e) => preview(p.sig, sr, e.currentTarget);
+      li.appendChild(actionButtons(p.sig, sr, `${base}_${p.file}`, p.lp));
       pl.appendChild(li);
     }
 
@@ -339,24 +317,52 @@ function render() {
       li.innerHTML = `<button class="play small" aria-label="Play">▶</button>` +
         `<span class="t">${fmtTime(hit.time)}</span>` +
         `<span class="m" title="How closely this hit matches the averaged kick">${(hit.match * 100).toFixed(1)}% match</span>`;
-      li.querySelector('.play').onclick = (e) => play(hit.sig, sr, e.currentTarget);
-      li.appendChild(dlButtons(hit.sig, sr, `${base}_hit${hi + 1}_${hit.time.toFixed(2)}s`));
+      li.querySelector('.play').onclick = (e) => preview(hit.sig, sr, e.currentTarget);
+      li.appendChild(actionButtons(hit.sig, sr, `${base}_hit${hi + 1}_${hit.time.toFixed(2)}s`,
+        { name: `${L} hit ${fmtTime(hit.time).replace(/\.\d+$/, '')}`, category: 'hit' }));
       ul.appendChild(li);
     });
 
     (c.noisy ? noisyRows : rows).appendChild(row);
   });
 
-  $('#playSong').onclick = (e) => play(x, sr, e.currentTarget);
+  // ---- song snippets
+  const snipWrap = $('#snippets');
+  snipWrap.innerHTML = '';
+  $('#snippetSection').hidden = !r.snippets.length;
+  r.snippets.forEach((s) => {
+    const cat = CATEGORIES[s.category];
+    const card = $('#snipTpl').content.firstElementChild.cloneNode(true);
+    card.style.setProperty('--c', cat.color);
+    card.querySelector('.snip-name').textContent = s.label;
+    card.querySelector('.snip-cat').textContent = cat.label;
+    const bars = s.beats / 4;
+    card.querySelector('.snip-meta').textContent =
+      `${bars >= 1 ? bars + ' bar' + (bars > 1 ? 's' : '') : s.beats + ' beats'} · ${s.duration.toFixed(2)} s · at ${fmtTime(s.start)}${s.loop ? ' · loops' : ''}`;
+    const audio = sliceSong(s.start, s.duration);
+    const cv = card.querySelector('canvas');
+    const a = Math.round(s.start * sr), b = a + audio[0].length;
+    drawers.push(() => drawWave(cv, x, a, b, () => cat.color));
+    card.querySelector('.play').onclick = (e) => preview(audio, sr, e.currentTarget);
+    card.querySelector('.snip-actions').appendChild(actionButtons(audio, sr, `${safe(song.name)}_${safe(s.label)}`,
+      { name: s.label, category: s.category, loop: s.loop, bpm: s.bpm, loopLen: s.duration }));
+    snipWrap.appendChild(card);
+  });
+
+  $('#playSong').onclick = (e) => preview(x, sr, e.currentTarget);
   redraw = () => drawers.forEach((d) => d());
   redraw();
 }
 
 let redraw = () => {};
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+  moveInk();
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => redraw(), 120);
+});
 // canvases inside a closed <details> have no size yet -> draw them when it opens
 $('#noisyWrap').addEventListener('toggle', () => redraw());
-let resizeTimer = 0;
-window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => redraw(), 120); });
 
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
