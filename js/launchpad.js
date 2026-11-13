@@ -71,6 +71,7 @@ export function stopAll() {
 }
 
 function startVoice(i, item) {
+  window.dispatchEvent(new CustomEvent('kx:play', { detail: 'launchpad' }));
   const ctx = audioCtx();
   const src = ctx.createBufferSource();
   src.buffer = bufferFor(item);
@@ -309,5 +310,6 @@ export async function initLaunchpad() {
     if (i >= 0) { e.preventDefault(); trigger(i); }
     else if (e.code === 'Space' && tag !== 'BUTTON') { e.preventDefault(); stopAll(); }
   });
+  window.addEventListener('kx:play', (e) => { if (e.detail !== 'launchpad') stopAll(); });
   requestAnimationFrame(tickLeds);
 }

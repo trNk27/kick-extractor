@@ -32,9 +32,9 @@ steady 4/4 grid, and it's the loudest thing in the mix. So:
 
 ## Tabs
 
-Bottom bar with three tabs: **Extract**, **Launchpad**, **Library**.
+Bottom bar with four tabs: **Extract**, **Launchpad**, **Track**, **Library**.
 
-## Launchpad and Library
+## Launchpad, Track Builder and Library
 
 Every sound has a **+LP** button: it saves the sound to the Library and puts it on a 4x4 pad grid (pick
 the pad in a small window, or save it to the library only). The Library lists every saved sample,
@@ -43,7 +43,12 @@ its pad, or delete it.
 Pads are grey until assigned, then coloured by category (kick, off-beat, full beat, single hit, loop,
 break, transition). One-shots retrigger; loops toggle and start on the next beat of whatever is already
 looping. Keys 1–4 / Q–R / A–F / Z–V (physical positions, so QWERTZ works too), Space stops everything.
-Library and pads are stored in IndexedDB, so they survive a reload and can mix sounds from different songs.
+
+The **Track** tab is a multi-lane beat/bar sequencer where you can build a track from Library samples,
+sounds from the current Extract session, or imported WAV/MP3/FLAC files. Paint or drag hits on the
+grid, use quick fill patterns (4/4 beats, off-beats, 2 & 4), shift individual kick pitches in
+semitones, mix lane levels with Mute/Solo, and bounce the arrangement to WAV, MP3, or the Launchpad.
+Library, pads, and the Track arrangement are stored in IndexedDB, so they survive a reload and can mix sounds from different songs.
 
 ## Design
 
@@ -71,8 +76,9 @@ css/style.css
 js/app.js        Extraction tab: decoding, drawing, results
 js/audio.js      playback + WAV/MP3 export
 js/launchpad.js  Launchpad tab, "+LP" pad picker, pad engine
+js/track.js      Track Builder tab, sequencer + offline bounce
 js/library.js    Library tab
-js/store.js      library + pad assignments (IndexedDB)
+js/store.js      library, pads, and track arrangement (IndexedDB)
 js/scene.js      the masthead scene
 fonts/           Michroma, Chakra Petch (OFL)
 js/worker.js     runs the analysis in a Web Worker

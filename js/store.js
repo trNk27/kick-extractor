@@ -2,11 +2,24 @@
 // items: every saved sample. pads: 16 slots holding an item id (or null).
 // Removing a sample from a pad keeps it in the library; deleting it from the library frees its pad.
 
-export const state = { items: [], pads: new Array(16).fill(null) };
+export const DEFAULT_TRACK = () => ({
+  name: 'My Track',
+  bpm: 150,
+  bars: 8,
+  loop: true,
+  lanes: [],
+});
+
+export const state = { items: [], pads: new Array(16).fill(null), track: DEFAULT_TRACK() };
 const listeners = new Set();
+let saveTimer = 0;
 
 export function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
-function changed(what) { for (const fn of listeners) fn(what); save(); }
+function changed(what) {
+  for (const fn of listeners) fn(what);
+  if (what === 'track') scheduleSaveTrack();
+  else save();
+}
 
 function idb() {
   return new Promise((resolve, reject) => {
@@ -29,6 +42,16 @@ async function save() {
     db.transaction('kv', 'readwrite').objectStore('kv').put({ items: state.items, pads: state.pads }, 'library');
   } catch { /* private mode etc.: nothing survives a reload, everything else works */ }
 }
+async function saveTrackNow() {
+  try {
+    const db = await idb();
+    db.transaction('kv', 'readwrite').objectStore('kv').put(state.track, 'track');
+  } catch { /* ignore */ }
+}
+export function scheduleSaveTrack() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveTrackNow, 150);
+}
 
 export async function load() {
   try {
@@ -49,6 +72,10 @@ export async function load() {
         });
         save();
       }
+    }
+    const trk = await get(db, 'track');
+    if (trk && Array.isArray(trk.lanes)) {
+      state.track = { ...DEFAULT_TRACK(), ...trk };
     }
   } catch { /* ignore */ }
   for (const fn of listeners) fn('load');
@@ -107,5 +134,67 @@ export function deleteItem(id) {
   const p = padOf(id);
   if (p >= 0) state.pads[p] = null;
   state.items = state.items.filter((it) => it.id !== id);
+  const hadLane = state.track.lanes.some((l) => l.itemId === id);
+  if (hadLane) {
+    state.track.lanes = state.track.lanes.filter((l) => l.itemId !== id);
+    scheduleSaveTrack();
+  }
   changed('items');
+}
+
+// ---------------------------------------------------------------- track builder
+
+export function setTrackMeta(patch) {
+  Object.assign(state.track, patch);
+  changed('track');
+}
+
+export function addTrackLane(itemId, clips = []) {
+  const lane = {
+    id: newId(),
+    itemId,
+    gain: 1,
+    pitch: 0,
+    mute: false,
+    solo: false,
+    clips: clips.map((c) => ({ id: newId(), beat: c.beat, pitch: c.pitch || 0 })),
+  };
+  state.track.lanes.push(lane);
+  changed('track');
+  return lane;
+}
+
+export function removeTrackLane(laneId) {
+  state.track.lanes = state.track.lanes.filter((l) => l.id !== laneId);
+  changed('track');
+}
+
+export function moveTrackLane(laneId, dir) {
+  const idx = state.track.lanes.findIndex((l) => l.id === laneId);
+  const next = idx + dir;
+  if (idx < 0 || next < 0 || next >= state.track.lanes.length) return;
+  const [lane] = state.track.lanes.splice(idx, 1);
+  state.track.lanes.splice(next, 0, lane);
+  changed('track');
+}
+
+export function updateTrackLane(laneId, patch, notify = true) {
+  const lane = state.track.lanes.find((l) => l.id === laneId);
+  if (!lane) return;
+  Object.assign(lane, patch);
+  if (notify) changed('track');
+  else scheduleSaveTrack();
+}
+
+export function setLaneClips(laneId, clips, notify = true) {
+  const lane = state.track.lanes.find((l) => l.id === laneId);
+  if (!lane) return;
+  lane.clips = [...clips].sort((a, b) => a.beat - b.beat);
+  if (notify) changed('track');
+  else scheduleSaveTrack();
+}
+
+export function clearTrack() {
+  state.track.lanes = [];
+  changed('track');
 }

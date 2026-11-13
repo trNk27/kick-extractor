@@ -2,6 +2,7 @@ import { mixToMono } from './dsp.js';
 import { preview, stopPreview, download } from './audio.js';
 import { initLaunchpad, openPadPicker, CATEGORIES } from './launchpad.js';
 import { initLibrary } from './library.js';
+import { initTrack, redrawTrack } from './track.js';
 import { load as loadStore, subscribe, state } from './store.js';
 import { scene } from './scene.js';
 
@@ -27,6 +28,7 @@ function selectTab(name) {
   $('#toast').classList.remove('show');
   stopPreview();
   if (name === 'extract') redraw();
+  if (name === 'track') redrawTrack();
   window.scrollTo({ top: 0 });
 }
 document.querySelectorAll('.nav-btn').forEach((t) => t.addEventListener('click', () => selectTab(t.dataset.tab)));
@@ -35,6 +37,7 @@ window.addEventListener('kx:tab', (e) => selectTab(e.detail));
 scene.init();
 initLaunchpad();
 initLibrary();
+initTrack();
 subscribe(() => {
   const n = state.pads.filter(Boolean).length;
   const b = $('#lpCount');
@@ -356,13 +359,45 @@ function render() {
   $('#playSong').onclick = (e) => preview(x, sr, e.currentTarget);
   redraw = () => drawers.forEach((d) => d());
   redraw();
+
+  // Share extracted kicks, off-beats, and snippets with Track Builder
+  const extracted = [];
+  r.clusters.forEach((c, ci) => {
+    if (c.noisy) return;
+    const L = LETTERS[ci];
+    if (c.parts) {
+      extracted.push({ key: `k-${L}`, name: `Kick ${L}`, category: 'kick', sr, channels: [c.parts.kick], loop: false, bpm: r.bpm, song: song.name });
+      extracted.push({ key: `o-${L}`, name: `Off-beat ${L}`, category: 'offbeat', sr, channels: [c.parts.offbeat], loop: false, bpm: r.bpm, song: song.name });
+      extracted.push({ key: `b-${L}`, name: `Beat ${L}`, category: 'beat', sr, channels: [c.median], loop: false, bpm: r.bpm, song: song.name });
+    } else {
+      extracted.push({ key: `k-${L}`, name: `Kick ${L}`, category: 'kick', sr, channels: [c.median], loop: false, bpm: r.bpm, song: song.name });
+    }
+    if (c.cleanest[0]) {
+      const hit = c.cleanest[0];
+      extracted.push({ key: `h-${L}`, name: `${L} hit ${fmtTime(hit.time).replace(/\.\d+$/, '')}`, category: 'hit', sr, channels: [hit.sig], loop: false, bpm: r.bpm, song: song.name });
+    }
+  });
+  r.snippets.forEach((s, si) => {
+    extracted.push({
+      key: `s-${si}`,
+      name: s.label,
+      category: s.category,
+      sr,
+      channels: sliceSong(s.start, s.duration),
+      loop: s.loop,
+      bpm: s.bpm,
+      loopLen: s.duration,
+      song: song.name,
+    });
+  });
+  window.dispatchEvent(new CustomEvent('kx:extracted', { detail: { bpm: r.bpm, sounds: extracted } }));
 }
 
 let redraw = () => {};
 let resizeTimer = 0;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => redraw(), 120);
+  resizeTimer = setTimeout(() => { redraw(); redrawTrack(); }, 120);
 });
 // canvases inside a closed <details> have no size yet -> draw them when it opens
 $('#noisyWrap').addEventListener('toggle', () => redraw());

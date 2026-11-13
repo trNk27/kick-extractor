@@ -109,6 +109,119 @@
       </div>
     </section>
 
+    <!-- ============================== TRACK BUILDER ============================== -->
+    <section class="tab-panel" id="tab-track" aria-label="Track Builder" hidden>
+      <div class="trk-console notch">
+        <div class="trk-transport">
+          <button type="button" class="btn primary trk-play" id="trkPlay" aria-label="Play or pause (Space)" title="Play / Pause (Space)">▶ Play</button>
+          <button type="button" class="hw" id="trkStop" aria-label="Stop and rewind" title="Stop &amp; rewind">■</button>
+          <button type="button" class="hw" id="trkLoop" aria-pressed="true" title="Loop arrangement">Loop</button>
+          <span class="trk-clock" id="trkClock">BAR 01.1 <small>0:00.0</small></span>
+        </div>
+
+        <div class="trk-settings">
+          <label class="trk-field">BPM
+            <input type="number" id="trkBpm" min="60" max="240" step="0.5" value="150">
+          </label>
+          <button type="button" class="hw trk-sync-bpm" id="trkSyncBpm" hidden title="Use the BPM from the extracted track"></button>
+          <div class="trk-stepper" aria-label="Track length in bars">
+            <button type="button" class="hw" id="trkBarsDown" title="Remove 4 bars">−4</button>
+            <span class="trk-bars-val" id="trkBars">8 bars</span>
+            <button type="button" class="hw" id="trkBarsUp" title="Add 4 bars">+4</button>
+          </div>
+          <label class="trk-field">Snap
+            <select id="trkSnap">
+              <option value="4">1 bar</option>
+              <option value="1" selected>1 beat</option>
+              <option value="0.5">1/2 beat</option>
+              <option value="0.25">1/4 beat</option>
+            </select>
+          </label>
+          <div class="trk-seg" role="group" aria-label="Tool">
+            <button type="button" class="hw" id="trkToolDraw" aria-pressed="true" title="Click or drag to place and remove hits">Draw</button>
+            <button type="button" class="hw" id="trkToolPitch" aria-pressed="false" title="Click or drag vertically on hits to shift pitch (semitones)">Pitch</button>
+          </div>
+          <div class="trk-stepper" aria-label="Zoom">
+            <button type="button" class="hw" id="trkZoomOut" title="Zoom out">−</button>
+            <span class="trk-zoom-lbl">Zoom</span>
+            <button type="button" class="hw" id="trkZoomIn" title="Zoom in">+</button>
+          </div>
+        </div>
+
+        <div class="trk-export">
+          <input class="trk-name" id="trkName" maxlength="32" value="My Track" aria-label="Track name" autocomplete="off" spellcheck="false">
+          <button type="button" class="dl small" id="trkWav" title="Render and download 24-bit WAV">⬇ WAV</button>
+          <button type="button" class="dl small" id="trkMp3" title="Render and download 320 kbps MP3">⬇ MP3</button>
+          <button type="button" class="lp-add" id="trkToLp" title="Bounce this track to your Library and Launchpad">+LP</button>
+          <button type="button" class="hw danger" id="trkClear" title="Clear all tracks">Clear</button>
+        </div>
+      </div>
+
+      <div class="trk-pitchbar" id="trkPitchBar" hidden>
+        <span class="trk-pitch-info" id="trkPitchInfo"></span>
+        <div class="trk-pitch-btns">
+          <button type="button" class="hw" data-semi="-12">−12</button>
+          <button type="button" class="hw" data-semi="-1">−1</button>
+          <span class="trk-pitch-val" id="trkPitchVal">0 st</span>
+          <button type="button" class="hw" data-semi="1">+1</button>
+          <button type="button" class="hw" data-semi="12">+12</button>
+          <button type="button" class="hw" id="trkPitchReset">Reset</button>
+        </div>
+      </div>
+
+      <div class="trk-stage notch" id="trkStage">
+        <div class="trk-empty" id="trkEmpty">
+          <p><b>Build your track</b> — add kicks and samples from below, or drop audio files here.</p>
+          <p class="section-note">Click or drag on the beat grid to paint kicks, off-beats, claps, and loops. Switch to <b>Pitch</b> mode to tune individual kicks to your melody.</p>
+        </div>
+        <div class="trk-grid-wrap" id="trkGridWrap" hidden>
+          <div class="trk-headers" id="trkHeaders">
+            <div class="trk-corner"><span>TRACKS</span><span id="trkLaneCount"></span></div>
+            <div class="trk-header-list" id="trkHeaderList"></div>
+          </div>
+          <div class="trk-scroll" id="trkScroll">
+            <div class="trk-ruler-wrap">
+              <canvas class="trk-ruler" id="trkRuler"></canvas>
+            </div>
+            <div class="trk-lanes" id="trkLanes">
+              <div class="trk-playhead" id="trkPlayhead"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="trk-palette notch" id="trkPalette" aria-label="Sample Palette">
+        <div class="trk-pal-head">
+          <div class="trk-pal-title">
+            <h2>Kicks &amp; Samples</h2>
+            <div class="trk-seg" id="trkSourceTabs" role="tablist" aria-label="Sample source">
+              <button type="button" class="hw" data-src="library" aria-pressed="true">Library <span id="trkLibBadge">0</span></button>
+              <button type="button" class="hw" data-src="extracted" aria-pressed="false" hidden>Extracted <span id="trkExtBadge">0</span></button>
+            </div>
+          </div>
+          <div class="trk-import-wrap">
+            <select id="trkImportCat" aria-label="Category for imported samples" title="Category for imported samples">
+              <option value="auto">Auto tag</option>
+              <option value="kick">Kick</option>
+              <option value="offbeat">Off-beat</option>
+              <option value="beat">Full beat</option>
+              <option value="hit">Single hit</option>
+              <option value="loop">Loop</option>
+              <option value="break">Break</option>
+              <option value="fx">Transition</option>
+            </select>
+            <label class="btn small primary trk-import-btn">
+              <input type="file" id="trkImportFile" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a" multiple hidden>
+              + Import sample
+            </label>
+          </div>
+        </div>
+        <div class="lib-filter" id="trkPalFilter" role="group" aria-label="Filter samples"></div>
+        <ul class="trk-pal-list" id="trkPalList"></ul>
+        <p class="trk-pal-empty" id="trkPalEmpty"></p>
+      </section>
+    </section>
+
     <!-- ============================== LIBRARY ============================== -->
     <section class="tab-panel" id="tab-library" aria-label="Library" hidden>
       <div class="lib-head">
@@ -135,6 +248,12 @@
         <g class="on"><path d="M3.5 3.5h7.5v7.5H3.5zM13 3.5h7.5v7.5H13zM3.5 13h7.5v7.5H3.5zM13 13h7.5v7.5H13z" stroke="none"/></g>
       </svg>
       <span class="nav-badge" id="lpCount" hidden>0</span>
+    </button>
+    <button class="nav-btn" data-tab="track" aria-current="false" aria-label="Track" title="Track Builder">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+        <g class="off"><path d="M3.5 4.5h9v4h-9zM7.5 10.5h13v4h-13zM3.5 16.5h11v4h-11z" stroke-width="1.8"/></g>
+        <g class="on"><path d="M3 4h10v4.5H3zM7 10h14v4.5H7zM3 16h12v4.5H3z" stroke="none"/></g>
+      </svg>
     </button>
     <button class="nav-btn" data-tab="library" aria-current="false" aria-label="Library" title="Library">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
